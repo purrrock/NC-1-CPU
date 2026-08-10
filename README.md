@@ -1,29 +1,31 @@
-# NC-1 CPU
+# Проект NC-1: 4-битный CPU и Эмулятор
 
-**NC-1** is a minimalist 4-bit RISC microprocessor designed for education, FPGA experiments, digital logic implementation, and emulator development.
+**NC-1** — это минималистичный 4-битный RISC-микропроцессор, спроектированный для образовательных целей, экспериментов с ПЛИС (FPGA), изучения цифровой логики и разработки программных эмуляторов. 
 
-The architecture focuses on simplicity, orthogonality, and a very small hardware footprint while remaining expressive enough to support a tiny operating system, user applications, and memory-mapped peripherals.
-
----
-
-## Highlights
-
-- 4-bit RISC architecture
-- 8-bit address space (256 nibbles per bank)
-- Modified Harvard architecture
-- Separate ROM and RAM memory banks
-- Orthogonal register file
-- Hardware stack
-- Memory-mapped I/O
-- System/User execution modes
-- Software interrupt support
-- Minimal instruction set
+Данный репозиторий содержит полную техническую спецификацию архитектуры, а также визуальный программный эмулятор отладочной платы, написанный на Python. Архитектура делает упор на простоту, ортогональность и минимальный аппаратный размер, оставаясь при этом достаточно выразительной для поддержки крошечной ОС, пользовательских приложений и периферии с отображением в память (MMIO).
 
 ---
 
-# Architecture Overview
+## Ключевые особенности
 
-```
+**Аппаратная часть:**
+- 4-битная RISC-архитектура с 8-битной шиной адреса (256 нибблов на банк).
+- Модифицированная Гарвардская архитектура с раздельными банками ROM (Система) и RAM (Пользователь).
+- Аппаратный стек и ортогональный регистровый файл (PC, SP и Флаги доступны как обычные регистры).
+- Механизм **Shadow Write** (Теневая запись) для прозрачной загрузки программ в RAM.
+- Периферия Memory-Mapped I/O (MMIO).
+- Поддержка программных прерываний (SWI) и системных/пользовательских режимов.
+
+**Программная часть (Эмулятор):**
+- Интегрированный ассемблер (ISA v4.0).
+- Потактовое и поинструкционное выполнение кода.
+- GUI с матричной клавиатурой, Hex-индикаторами и интерактивным просмотром памяти.
+
+---
+
+## Обзор архитектуры
+
+```text
              +----------------------+
              |        NC-1 CPU      |
              +----------------------+
@@ -38,48 +40,41 @@ The architecture focuses on simplicity, orthogonality, and a very small hardware
                  MMIO Devices
 ```
 
-The processor always sees a single address space (`0x00–0xFF`).
+Процессор всегда работает в едином адресном пространстве (`0x00–0xFF`). Активный банк памяти зависит от флага **Mode (M)**:
+- **System Mode (M=1)** → Чтение из ROM
+- **User Mode (M=0)** → Чтение из RAM
 
-The currently visible memory bank depends on the **Mode (M)** flag:
-
-- **System Mode** → ROM
-- **User Mode** → RAM
-
-Reads are bank-dependent, while writes always target RAM.
+**Shadow Write:** Запись всегда производится в банк RAM независимо от состояния флага M. Это позволяет операционной системе загружать код в пользовательскую память, продолжая исполнение из ROM.
 
 ---
 
-# CPU Specifications
+## Технические спецификации CPU
 
-| Property | Value |
-|----------|-------|
-| Data width | 4 bits |
-| Address width | 8 bits |
-| Address space | 256 nibbles |
-| Architecture | Modified Harvard |
-| Registers | 8 |
-| Stack | Hardware |
-| Instruction length | 1–3 nibbles |
-| ALU width | 4 bits |
-
----
-
-# Register File
-
-| Register | Description |
-|----------|-------------|
-| A | Accumulator |
-| B | General-purpose register |
-| X | Address high nibble |
-| Y | Address low nibble |
-| SP | Stack Pointer |
-| FL | Flags Register |
-| PCH | Program Counter High |
-| PCL | Program Counter Low |
-
-Unlike many small CPUs, the program counter, stack pointer and flags are directly accessible as ordinary registers.
+| Параметр | Значение |
+|----------|----------|
+| Ширина данных | 4 бита |
+| Ширина адреса | 8 бит |
+| Адресное пространство| 256 нибблов на банк |
+| Архитектура | Модифицированная Гарвардская |
+| Регистры | 8 (прямой доступ по ID) |
+| Стек | Аппаратный |
+| Длина инструкций | 1–3 ниббла |
 
 ---
+
+## Регистровый файл и Флаги
+
+| ID | Регистр | Описание |
+|---|---|---|
+| `000` | **A** | Аккумулятор (Основной регистр АЛУ) |
+| `001` | **B** | Вспомогательный регистр |
+| `010` | **X** | Старший ниббл адреса |
+| `011` | **Y** | Младший ниббл адреса |
+| `100` | **SP** | Указатель стека |
+| `101` | **FL** | Регистр флагов (Бит 3: **R**, Бит 2: **M**, Бит 1: **C**, Бит 0: **Z**) |
+| `110` | **PCH** | Старший ниббл счетчика команд |
+| `111` | **PCL** | Младший ниббл счетчика команд (Запись вызывает немедленный JUMP) |
+
 
 # Flags Register
 
@@ -90,18 +85,25 @@ Unlike many small CPUs, the program counter, stack pointer and flags are directl
 | 1 | C | Carry |
 | 0 | Z | Zero |
 
----
-
-# Memory Layout
-
-| Address | Purpose |
-|----------|---------|
-| `00–0F` | Reset vector / Zero page |
-| `10–CF` | Program memory |
-| `D0–EF` | Stack / Data |
-| `F0–FF` | MMIO |
 
 ---
+
+## Карта памяти и Ввод-Вывод (MMIO)
+
+| Диапазон адресов | Назначение |
+|---|---|
+| `00–0F` | Вектор сброса (Unified Entry Point) / Zero page |
+| `10–CF` | Память программ (Код) |
+| `D0–EF` | Аппаратный стек (растет вниз от `EF`) и данные |
+| `F0–FF` | Устройства Memory-Mapped I/O |
+
+**Спецификация портов MMIO:**
+* `F0–F3`: 7-сегментные Hex-индикаторы (Только запись).
+* `F4`: Статус клавиатуры (1 = клавиша нажата, 0 = отпущена) (Только чтение).
+* `F5`: Скан-код последней нажатой клавиши `0-F` (Только чтение).
+* `F6`: Управление динамиком (Бит 0: 1 = Вкл, 0 = Выкл).
+* `F7`: Аппаратный генератор случайных чисел.
+* `FE–FF`: Теневые регистры SPC_L и SPC_H для сохранения PC при вызове `SWI`.
 
 # Memory Banking
 
@@ -134,9 +136,11 @@ One distinctive feature of NC-1 is **Shadow Write**:
 
 This allows the operating system to load user programs while executing from ROM.
 
+
 ---
 
-# Instruction Set
+## Набор инструкций (ISA v4.0)
+
 
 | Opcode | Instruction |
 |---------|-------------|
@@ -178,20 +182,6 @@ The operating system is entered through a unified entry point at address `0x00`.
 
 ---
 
-# Memory-Mapped I/O
-
-| Address | Device |
-|----------|--------|
-| F0–F3 | Hex Displays |
-| F4 | Keyboard Status |
-| F5 | Keyboard Code |
-| F6 | Speaker |
-| F7 | Random Number Generator |
-| FE | Shadow PC Low |
-| FF | Shadow PC High |
-
----
-
 # Design Goals
 
 The NC-1 architecture was designed around the following principles:
@@ -223,10 +213,42 @@ The complete processor specification is available in:
 
 ```
 docs/NC-1_Technical_Specification.md
-```
+
 
 ---
 
-# License
+## Программный эмулятор и отладочная плата
+
+Проект включает полноценный эмулятор с графическим интерфейсом для отладки ассемблерного кода и тестирования архитектуры.
+
+**Системные требования:**
+* Python 3.10+
+* PyQt6 или Tkinter
+
+**Запуск эмулятора:**
+```bash
+# Перейдите в корневую директорию репозитория и выполните:
+python -m emu.nc1
+```
+
+**Возможности GUI:**
+* Текстовый редактор для написания и загрузки программ (`.asm`).
+* Кнопки кросс-компиляции `Assemble to ROM` и `Assemble to RAM`.
+* Двойной Hex-редактор (DataGrid) для мониторинга банков памяти в реальном времени с подсветкой текущей инструкции.
+* Визуализация 7-сегментных индикаторов и интерактивная матричная клавиатура.
+* Пошаговая отладка (`Step`), автоматическое выполнение (`Run`) и аппаратный сброс (`Reset`).
+
+---
+
+## Структура репозитория
+
+* `/docs/` — Полная техническая спецификация (`NC-1_Specification.md`).
+* `/emu/` — Исходный код эмулятора на Python (CPU, MMU, Ассемблер, GUI).
+* `/asm/` — Примеры программ на ассемблере NC-1 (включая скрипты тестирования MMIO).
+* `README.md` — Главный файл описания архитектуры.
+
+---
+
+## Лицензия
 
 MIT License.
