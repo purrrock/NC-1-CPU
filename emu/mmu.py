@@ -7,20 +7,22 @@ class MMU:
     and Shadow Write logic.
     """
     def __init__(self):
-        # 256 nibbles per bank
         self.rom = [0] * 256
         self.ram = [0] * 256
 
         # MMIO State
-        self.displays = [0, 0, 0, 0]  # F0 - F3
-        self.kbd_stat = 0             # F4
-        self.kbd_code = 0             # F5
-        self.audio = 0                # F6
-        self.spc_l = 0                # FE
-        self.spc_h = 0                # FF
+        self.displays = [0, 0, 0, 0]
+        self.kbd_stat = 0
+        self.kbd_code = 0
+        self.audio = 0
+        self.spc_l = 0
+        self.spc_h = 0
 
-        # Random number generator logic
         self.rng_func = lambda: random.randint(0, 15)
+        
+        # Callbacks для связи аппаратной части с GUI
+        self.audio_callback = None
+        self.display_callback = None
 
     def read(self, address: int, m_flag: int) -> int:
         """
@@ -74,14 +76,22 @@ class MMU:
     def _mmio_write(self, address: int, value: int):
         """Handles writing to Memory-Mapped I/O."""
         if 0xF0 <= address <= 0xF3:
-            self.displays[address - 0xF0] = value
+            idx = address - 0xF0
+            self.displays[idx] = value
+            if self.display_callback:
+                self.display_callback(idx, value)
+                
         elif address == 0xF6:
-            self.audio = value & 0x01
+            new_audio_state = value & 0x01
+            # Вызываем callback только при фактическом изменении состояния
+            if self.audio_callback and self.audio != new_audio_state:
+                self.audio_callback(new_audio_state)
+            self.audio = new_audio_state
+            
         elif address == 0xFE:
             self.spc_l = value
         elif address == 0xFF:
             self.spc_h = value
-        # Writes to KBD_STAT, KBD_CODE, RNG are ignored as they are read-only from CPU's perspective.
 
     def load_rom(self, program: list[int]):
         """Helper to load a program into ROM."""
@@ -105,3 +115,11 @@ class MMU:
         self.spc_h = 0
         # ROM and RAM contents are usually preserved across resets in hardware,
         # but zeroing RAM might be useful. For now, keep them intact like real memory.
+    def hardware_inject_key(self, scancode: int):
+        """Имитация аппаратного прерывания от контроллера клавиатуры (Key Pressed)"""
+        self.kbd_code = scancode & 0x0F
+        self.kbd_stat = 1
+
+    def hardware_release_key(self):
+        """Имитация снятия сигнала удержания клавиши (Key Released)"""
+        self.kbd_stat = 0

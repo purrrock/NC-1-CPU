@@ -107,31 +107,33 @@ class CPU:
             self.mmu.write(addr, self.regs.a)
 
         elif opcode == 0x5:
-            # ADD Reg
+            # ADD Reg (Опкод 5)
             operand = self.fetch()
-            r = operand & 0x07
+            r = operand & 0x07        # Извлечение 3-битного ID регистра (RRR)
             val1 = self.regs.a
             val2 = self.regs.read(r)
 
             res = val1 + val2
-            self.regs.a = res & 0x0F
+            self.regs.a = res & 0x0F  # Аппаратное усечение до 4 бит (по модулю 16)
 
-            # Flags
+            # Обновление флагов (FL)
+            # Carry (Переполнение): взводится, если сумма превысила 4 бита (15)
             self.regs.set_flag_c(1 if res > 0x0F else 0)
+            # Zero (Нулевой результат): проверяется только 4-битный результат
             self.regs.set_flag_z(1 if (res & 0x0F) == 0 else 0)
 
         elif opcode == 0x6:
-            # SUB Reg
+            # SUB Reg (Опкод 6)
             operand = self.fetch()
             r = operand & 0x07
             val1 = self.regs.a
             val2 = self.regs.read(r)
 
             res = val1 - val2
-            self.regs.a = res & 0x0F
+            self.regs.a = res & 0x0F  # Усечение обрабатывает отрицательные числа (Two's complement)
 
-            # Flags: C is Borrow in SUB (0 if borrow, 1 if no borrow? or 1 if borrow?)
-            # Usually in 4-bit, carry out of adder is inverted borrow. Let's set C=1 if no borrow (val1 >= val2)
+            # Carry в вычитании работает как инвертированный флаг заёма (Borrow).
+            # Если val1 >= val2, заём не требуется, флаг C = 1.
             self.regs.set_flag_c(1 if val1 >= val2 else 0)
             self.regs.set_flag_z(1 if (res & 0x0F) == 0 else 0)
 
