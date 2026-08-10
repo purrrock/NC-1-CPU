@@ -28,7 +28,7 @@ class GUI:
         editor_frame = ttk.LabelFrame(left_panel, text="Code Editor")
         editor_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        self.editor = tk.Text(editor_frame, width=40, height=20, font=("Courier New", 10))
+        self.editor = tk.Text(editor_frame, width=25, height=20, font=("Courier New", 10))
         self.editor.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Editor Controls
@@ -86,8 +86,11 @@ class GUI:
         mmio_frame.pack(fill=tk.X, pady=5)
         self.mmio_labels = []
         for i in range(4):
-            lbl = ttk.Label(mmio_frame, text="0", font=("Courier New", 18, "bold"), foreground="red", background="black", width=2, anchor=tk.CENTER)
-            lbl.pack(side=tk.LEFT, padx=10, pady=5)
+            disp_subframe = ttk.Frame(mmio_frame)
+            disp_subframe.pack(side=tk.LEFT, padx=10, pady=5)
+            lbl = ttk.Label(disp_subframe, text="0", font=("Courier New", 18, "bold"), foreground="red", background="black", width=2, anchor=tk.CENTER)
+            lbl.pack()
+            ttk.Label(disp_subframe, text=f"F{3-i}").pack()
             self.mmio_labels.append(lbl)
 
         # Memory Viewer
@@ -95,18 +98,21 @@ class GUI:
         mem_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
         # Notebook for ROM / RAM tabs
-        notebook = ttk.Notebook(mem_frame)
-        notebook.pack(fill=tk.BOTH, expand=True)
+        self.notebook = ttk.Notebook(mem_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
 
-        self.rom_tree = self.create_mem_tree(notebook, "ROM")
-        self.ram_tree = self.create_mem_tree(notebook, "RAM")
+        self.rom_tree = self.create_mem_tree(self.notebook, "ROM")
+        self.ram_tree = self.create_mem_tree(self.notebook, "RAM")
 
-        notebook.add(self.rom_tree, text="ROM (System)")
-        notebook.add(self.ram_tree, text="RAM (User)")
+        self.notebook.add(self.rom_tree, text="ROM (System)")
+        self.notebook.add(self.ram_tree, text="RAM (User)")
 
     def create_mem_tree(self, parent, name):
         columns = [f"{i:X}" for i in range(16)]
-        tree = ttk.Treeview(parent, columns=columns, show="headings", height=16)
+        tree = ttk.Treeview(parent, columns=columns, show="tree headings", height=16)
+
+        tree.heading("#0", text="Addr")
+        tree.column("#0", width=45, anchor=tk.CENTER)
 
         for col in columns:
             tree.heading(col, text=col)
@@ -115,7 +121,7 @@ class GUI:
         # Insert 16 rows
         for r in range(16):
             row_id = f"{r:X}0"
-            tree.insert("", "end", iid=row_id, values=(["0"]*16))
+            tree.insert("", "end", iid=row_id, text=row_id, values=(["0"]*16))
 
         return tree
 
@@ -154,6 +160,12 @@ class GUI:
         self.update_mem_tree(self.rom_tree, self.cpu.mmu.rom, pc if m_flag == 1 else -1)
         self.update_mem_tree(self.ram_tree, self.cpu.mmu.ram, pc if m_flag == 0 else -1)
 
+        # Bank Switching
+        if m_flag == 1:
+            self.notebook.select(self.rom_tree)
+        else:
+            self.notebook.select(self.ram_tree)
+
     def update_mem_tree(self, tree, memory, highlight_pc):
         for r in range(16):
             row_id = f"{r:X}0"
@@ -161,16 +173,10 @@ class GUI:
             for c in range(16):
                 idx = r * 16 + c
                 val_str = f"{memory[idx]:X}"
-                # In Treeview, highlighting a single cell is hard. We can highlight the row.
-                # Actually, standard Treeview doesn't support cell-level formatting easily.
-                # We'll prefix the PC cell with '*' or something if needed.
                 if idx == highlight_pc:
                     val_str = f"[{val_str}]"
                 values.append(val_str)
             tree.item(row_id, values=values)
-            if highlight_pc >= 0 and (highlight_pc // 16) == r:
-                tree.selection_set(row_id)
-                tree.focus(row_id)
 
     def load_code(self):
         filepath = filedialog.askopenfilename(defaultextension=".asm", filetypes=[("Assembly", "*.asm"), ("All Files", "*.*")])
