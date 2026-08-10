@@ -210,21 +210,27 @@ class GUI:
         pc = regs.pc
         m_flag = regs.get_flag_m()
 
-        self.update_mem_tree(self.rom_tree, self.cpu.mmu.rom, pc if m_flag == 1 else -1)
-        self.update_mem_tree(self.ram_tree, self.cpu.mmu.ram, pc if m_flag == 0 else -1)
+        # Передаем идентификатор банка (1 - ROM, 0 - RAM) вместо самого массива
+        self.update_mem_tree(self.rom_tree, 1, pc if m_flag == 1 else -1)
+        self.update_mem_tree(self.ram_tree, 0, pc if m_flag == 0 else -1)
 
         if m_flag == 1:
             self.notebook.select(self.rom_tree)
         else:
             self.notebook.select(self.ram_tree)
 
-    def update_mem_tree(self, tree, memory, highlight_pc):
+    def update_mem_tree(self, tree, bank_flag, highlight_pc):
         for r in range(16):
             row_id = f"{r:X}0"
             values = []
             for c in range(16):
                 idx = r * 16 + c
-                val_str = f"{memory[idx]:X}"
+                
+                # Аппаратное чтение через MMU. 
+                # Гарантирует корректный поллинг MMIO-устройств в диапазоне F0-FF.
+                val = self.cpu.mmu.read(idx, bank_flag)
+                val_str = f"{val:X}"
+                
                 if idx == highlight_pc:
                     val_str = f"[{val_str}]"
                 values.append(val_str)
