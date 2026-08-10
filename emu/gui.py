@@ -20,18 +20,18 @@ class GUI:
         main_frame = ttk.Frame(self.root, padding=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Left Panel (Editor + Controls)
+        # -------------------------------------------------------------
+        # Left Panel: Инструменты разработки (Редактор, Управление)
+        # -------------------------------------------------------------
         left_panel = ttk.Frame(main_frame)
         left_panel.pack(side=tk.LEFT, fill=tk.Y, expand=False)
 
-        # Code Editor
         editor_frame = ttk.LabelFrame(left_panel, text="Code Editor")
         editor_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        self.editor = tk.Text(editor_frame, width=12, height=20, font=("Courier New", 10))
+        self.editor = tk.Text(editor_frame, width=15, height=20, font=("Courier New", 10))
         self.editor.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # Editor Controls
         editor_ctrl_frame = ttk.Frame(left_panel)
         editor_ctrl_frame.pack(fill=tk.X, pady=5)
 
@@ -45,7 +45,6 @@ class GUI:
         ttk.Button(row2, text="Assemble to ROM", command=self.assemble_to_rom).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
         ttk.Button(row2, text="Assemble to RAM", command=self.assemble_to_ram).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
 
-        # Execution Controls
         exec_ctrl_frame = ttk.LabelFrame(left_panel, text="Execution")
         exec_ctrl_frame.pack(fill=tk.X, pady=5)
 
@@ -63,27 +62,35 @@ class GUI:
         self.delay_var = tk.StringVar(value="50")
         ttk.Entry(exec_row2, textvariable=self.delay_var, width=5).pack(side=tk.LEFT)
 
-        # Right Panel (Registers, Flags, Memory)
+        # -------------------------------------------------------------
+        # Right Panel: Аппаратный контекст и Память
+        # -------------------------------------------------------------
         right_panel = ttk.Frame(main_frame)
         right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10,0))
 
-        # Registers (7-segment mockups with labels)
-        reg_frame = ttk.LabelFrame(right_panel, text="Registers (Hex)")
-        reg_frame.pack(fill=tk.X, pady=5)
+        # --- Группа 1: Ядро (Регистры и Флаги) ---
+        # Использование side=tk.LEFT в дочерних фреймах позволяет выстроить их в единую горизонтальную строку
+        top_hw_frame = ttk.Frame(right_panel)
+        top_hw_frame.pack(fill=tk.X, pady=5)
+
+        reg_frame = ttk.LabelFrame(top_hw_frame, text="Registers (Hex)")
+        # fill=tk.Y гарантирует одинаковую высоту фрейма с соседними элементами по горизонтали
+        reg_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
 
         self.reg_labels = {}
         for i, reg in enumerate(["A", "B", "X", "Y", "SP", "FL", "PCH", "PCL", "PC"]):
+            # Расположение 9 регистров матрицей 3x3 через grid-менеджер
             ttk.Label(reg_frame, text=f"{reg}:").grid(row=i//3, column=(i%3)*2, padx=5, pady=2, sticky=tk.E)
             lbl = ttk.Label(reg_frame, text="0", font=("Courier New", 14, "bold"), foreground="red", background="black", width=2, anchor=tk.CENTER)
             lbl.grid(row=i//3, column=(i%3)*2+1, padx=5, pady=2)
             self.reg_labels[reg] = lbl
 
-        # Flags (LEDs)
-        flags_frame = ttk.LabelFrame(right_panel, text="Flags")
-        flags_frame.pack(fill=tk.X, pady=5)
+        flags_frame = ttk.LabelFrame(top_hw_frame, text="Flags")
+        flags_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         self.flag_canvas = tk.Canvas(flags_frame, height=30, width=150)
-        self.flag_canvas.pack(pady=5)
+        # Центрируем Canvas с помощью отступов
+        self.flag_canvas.pack(pady=20, padx=10)
 
         self.flag_leds = {}
         for i, flag in enumerate(["R", "M", "C", "Z"]):
@@ -92,30 +99,31 @@ class GUI:
             led = self.flag_canvas.create_oval(x-5, 18, x+5, 28, fill="gray")
             self.flag_leds[flag] = led
 
-        # MMIO Displays (F0-F3)
-        mmio_frame = ttk.LabelFrame(right_panel, text="MMIO Displays (F3-F0)")
-        mmio_frame.pack(fill=tk.X, pady=5)
+        # --- Группа 2: Периферия (Дисплеи, Клавиатура, Аудио) ---
+        mid_hw_frame = ttk.Frame(right_panel)
+        mid_hw_frame.pack(fill=tk.X, pady=5)
+
+        mmio_frame = ttk.LabelFrame(mid_hw_frame, text="MMIO Displays (F3-F0)")
+        mmio_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
+        
         self.mmio_labels = []
         for i in range(4):
             disp_subframe = ttk.Frame(mmio_frame)
-            disp_subframe.pack(side=tk.LEFT, padx=10, pady=5)
+            disp_subframe.pack(side=tk.LEFT, padx=8, pady=5)
             lbl = ttk.Label(disp_subframe, text="0", font=("Courier New", 18, "bold"), foreground="red", background="black", width=2, anchor=tk.CENTER)
             lbl.pack()
             ttk.Label(disp_subframe, text=f"F{3-i}").pack()
             self.mmio_labels.append(lbl)
 
-        # Keypad & Audio (F4-F6)
-        io_frame = ttk.Frame(right_panel)
-        io_frame.pack(fill=tk.X, pady=5)
+        io_frame = ttk.Frame(mid_hw_frame)
+        io_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Audio Indicator (F6)
         audio_frame = ttk.LabelFrame(io_frame, text="Audio (F6)")
         audio_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
         self.audio_canvas = tk.Canvas(audio_frame, height=50, width=50)
-        self.audio_canvas.pack(padx=10, pady=10)
+        self.audio_canvas.pack(padx=10, pady=20)
         self.audio_led = self.audio_canvas.create_oval(15, 15, 35, 35, fill="gray")
 
-        # Hex Keypad (F4-F5)
         keypad_frame = ttk.LabelFrame(io_frame, text="Keypad (F4-F5)")
         keypad_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -125,15 +133,16 @@ class GUI:
                 val = r * 4 + c
                 btn = ttk.Button(keypad_frame, text=f"{val:X}", width=4)
                 btn.grid(row=r, column=c, padx=2, pady=2)
+                
+                # Биндинг низкоуровневых событий X11/Windows для обработки зажатия клавиши (Имитация регистра-защелки)
                 btn.bind("<ButtonPress-1>", lambda e, v=val: self.on_keypad_press(v))
                 btn.bind("<ButtonRelease-1>", lambda e, v=val: self.on_keypad_release(v))
                 self.keys[val] = btn
 
-        # Memory Viewer
+        # --- Блок Памяти ---
         mem_frame = ttk.LabelFrame(right_panel, text="Memory Viewer")
         mem_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        # Notebook for ROM / RAM tabs
         self.notebook = ttk.Notebook(mem_frame)
         self.notebook.pack(fill=tk.BOTH, expand=True)
 
@@ -165,7 +174,6 @@ class GUI:
             tree.heading(col, text=col)
             tree.column(col, width=30, anchor=tk.CENTER)
 
-        # Insert 16 rows
         for r in range(16):
             row_id = f"{r:X}0"
             tree.insert("", "end", iid=row_id, text=row_id, values=(["0"]*16))
@@ -173,7 +181,6 @@ class GUI:
         return tree
 
     def update_ui(self):
-        # Update Registers
         regs = self.cpu.regs
         self.reg_labels["A"].config(text=f"{regs.a:X}")
         self.reg_labels["B"].config(text=f"{regs.b:X}")
@@ -185,7 +192,6 @@ class GUI:
         self.reg_labels["PCL"].config(text=f"{regs.pcl:X}")
         self.reg_labels["PC"].config(text=f"{regs.pc:02X}")
 
-        # Update Flags
         def update_led(flag, state):
             color = "red" if state else "gray"
             self.flag_canvas.itemconfig(self.flag_leds[flag], fill=color)
@@ -195,23 +201,18 @@ class GUI:
         update_led("C", regs.get_flag_c())
         update_led("Z", regs.get_flag_z())
 
-        # Update MMIO Displays (F3 down to F0)
-        # displays[3] is F3, displays[0] is F0. So we show them left-to-right as F3, F2, F1, F0
         for i in range(4):
             self.mmio_labels[i].config(text=f"{self.cpu.mmu.displays[3-i]:X}")
 
-        # Update Audio Indicator
         audio_color = "red" if self.cpu.mmu.audio else "gray"
         self.audio_canvas.itemconfig(self.audio_led, fill=audio_color)
 
-        # Update Memory Grids
         pc = regs.pc
         m_flag = regs.get_flag_m()
 
         self.update_mem_tree(self.rom_tree, self.cpu.mmu.rom, pc if m_flag == 1 else -1)
         self.update_mem_tree(self.ram_tree, self.cpu.mmu.ram, pc if m_flag == 0 else -1)
 
-        # Bank Switching
         if m_flag == 1:
             self.notebook.select(self.rom_tree)
         else:
