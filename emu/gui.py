@@ -93,6 +93,31 @@ class GUI:
             ttk.Label(disp_subframe, text=f"F{3-i}").pack()
             self.mmio_labels.append(lbl)
 
+        # Keypad & Audio (F4-F6)
+        io_frame = ttk.Frame(right_panel)
+        io_frame.pack(fill=tk.X, pady=5)
+
+        # Audio Indicator (F6)
+        audio_frame = ttk.LabelFrame(io_frame, text="Audio (F6)")
+        audio_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
+        self.audio_canvas = tk.Canvas(audio_frame, height=50, width=50)
+        self.audio_canvas.pack(padx=10, pady=10)
+        self.audio_led = self.audio_canvas.create_oval(15, 15, 35, 35, fill="gray")
+
+        # Hex Keypad (F4-F5)
+        keypad_frame = ttk.LabelFrame(io_frame, text="Keypad (F4-F5)")
+        keypad_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.keys = {}
+        for r in range(4):
+            for c in range(4):
+                val = r * 4 + c
+                btn = ttk.Button(keypad_frame, text=f"{val:X}", width=4)
+                btn.grid(row=r, column=c, padx=2, pady=2)
+                btn.bind("<ButtonPress-1>", lambda e, v=val: self.on_keypad_press(v))
+                btn.bind("<ButtonRelease-1>", lambda e, v=val: self.on_keypad_release(v))
+                self.keys[val] = btn
+
         # Memory Viewer
         mem_frame = ttk.LabelFrame(right_panel, text="Memory Viewer")
         mem_frame.pack(fill=tk.BOTH, expand=True, pady=5)
@@ -106,6 +131,17 @@ class GUI:
 
         self.notebook.add(self.rom_tree, text="ROM (System)")
         self.notebook.add(self.ram_tree, text="RAM (User)")
+
+    def on_keypad_press(self, val):
+        self.cpu.mmu.kbd_code = val & 0x0F
+        self.cpu.mmu.kbd_stat |= 0x01
+        if not self.is_running:
+            self.update_ui()
+
+    def on_keypad_release(self, val):
+        self.cpu.mmu.kbd_stat &= ~0x01
+        if not self.is_running:
+            self.update_ui()
 
     def create_mem_tree(self, parent, name):
         columns = [f"{i:X}" for i in range(16)]
@@ -152,6 +188,10 @@ class GUI:
         # displays[3] is F3, displays[0] is F0. So we show them left-to-right as F3, F2, F1, F0
         for i in range(4):
             self.mmio_labels[i].config(text=f"{self.cpu.mmu.displays[3-i]:X}")
+
+        # Update Audio Indicator
+        audio_color = "red" if self.cpu.mmu.audio else "gray"
+        self.audio_canvas.itemconfig(self.audio_led, fill=audio_color)
 
         # Update Memory Grids
         pc = regs.pc
