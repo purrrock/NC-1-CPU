@@ -22,35 +22,46 @@ class GUI:
 
         # Left Panel (Editor + Controls)
         left_panel = ttk.Frame(main_frame)
-        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        left_panel.pack(side=tk.LEFT, fill=tk.Y, expand=False)
 
         # Code Editor
         editor_frame = ttk.LabelFrame(left_panel, text="Code Editor")
         editor_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        self.editor = tk.Text(editor_frame, width=25, height=20, font=("Courier New", 10))
+        self.editor = tk.Text(editor_frame, width=12, height=20, font=("Courier New", 10))
         self.editor.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Editor Controls
         editor_ctrl_frame = ttk.Frame(left_panel)
         editor_ctrl_frame.pack(fill=tk.X, pady=5)
-        ttk.Button(editor_ctrl_frame, text="Load", command=self.load_code).pack(side=tk.LEFT, padx=2)
-        ttk.Button(editor_ctrl_frame, text="Save", command=self.save_code).pack(side=tk.LEFT, padx=2)
-        ttk.Button(editor_ctrl_frame, text="Assemble to ROM", command=self.assemble_to_rom).pack(side=tk.RIGHT, padx=2)
-        ttk.Button(editor_ctrl_frame, text="Assemble to RAM", command=self.assemble_to_ram).pack(side=tk.RIGHT, padx=2)
+
+        row1 = ttk.Frame(editor_ctrl_frame)
+        row1.pack(fill=tk.X, pady=2)
+        ttk.Button(row1, text="Load", command=self.load_code).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        ttk.Button(row1, text="Save", command=self.save_code).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+
+        row2 = ttk.Frame(editor_ctrl_frame)
+        row2.pack(fill=tk.X, pady=2)
+        ttk.Button(row2, text="Assemble to ROM", command=self.assemble_to_rom).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        ttk.Button(row2, text="Assemble to RAM", command=self.assemble_to_ram).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
 
         # Execution Controls
         exec_ctrl_frame = ttk.LabelFrame(left_panel, text="Execution")
         exec_ctrl_frame.pack(fill=tk.X, pady=5)
-        ttk.Button(exec_ctrl_frame, text="Step", command=self.step).pack(side=tk.LEFT, padx=5, pady=5)
-        ttk.Button(exec_ctrl_frame, text="Run", command=self.run).pack(side=tk.LEFT, padx=5, pady=5)
-        ttk.Button(exec_ctrl_frame, text="Pause", command=self.pause).pack(side=tk.LEFT, padx=5, pady=5)
-        ttk.Button(exec_ctrl_frame, text="Reset", command=self.reset).pack(side=tk.RIGHT, padx=5, pady=5)
 
-        # Delay config
-        ttk.Label(exec_ctrl_frame, text="Delay (ms):").pack(side=tk.LEFT, padx=(10,2), pady=5)
+        exec_row1 = ttk.Frame(exec_ctrl_frame)
+        exec_row1.pack(fill=tk.X, pady=2)
+        ttk.Button(exec_row1, text="Step", command=self.step).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        ttk.Button(exec_row1, text="Run", command=self.run).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        ttk.Button(exec_row1, text="Pause", command=self.pause).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+
+        exec_row2 = ttk.Frame(exec_ctrl_frame)
+        exec_row2.pack(fill=tk.X, pady=2)
+        ttk.Button(exec_row2, text="Reset", command=self.reset).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+
+        ttk.Label(exec_row2, text="Delay (ms):").pack(side=tk.LEFT, padx=(10,2))
         self.delay_var = tk.StringVar(value="50")
-        ttk.Entry(exec_ctrl_frame, textvariable=self.delay_var, width=5).pack(side=tk.LEFT, pady=5)
+        ttk.Entry(exec_row2, textvariable=self.delay_var, width=5).pack(side=tk.LEFT)
 
         # Right Panel (Registers, Flags, Memory)
         right_panel = ttk.Frame(main_frame)
