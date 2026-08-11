@@ -140,6 +140,22 @@ Peripherals are mapped to addresses `F0`..`FF`. Writes are directed to RAM/Perip
 | `FE` | **SPC_L** | R/W | Low nibble of Shadow PC (debugging/kernel). |
 | `FF` | **SPC_H** | R/W | High nibble of Shadow PC (debugging/kernel). |
 
+## 5. Memory-Mapped I/O Subsystem (MMIO)
+Peripherals are mapped to addresses `F0`..`FF`.
+
+| Address | Name | R/W | Bit 3 | Bit 2 | Bit 1 | Bit 0 | Description |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `F0` | **DISP_0** | R/W | D3 | D2 | D1 | D0 | Rightmost 7-segment hex display. |
+| `F1` | **DISP_1** | R/W | D3 | D2 | D1 | D0 | Display 1. |
+| `F2` | **DISP_2** | R/W | D3 | D2 | D1 | D0 | Display 2. |
+| `F3` | **DISP_3** | R/W | D3 | D2 | D1 | D0 | Leftmost 7-segment hex display. |
+| `F4` | **GPI_KBD** | R | `GPI_3` | `GPI_2` | `GPI_1` | `KBD` | `Bit 0`: 1 = Key pressed. `Bits 1..3`: General Purpose Input lines. |
+| `F5` | **KBD_CODE**| R | K3 | K2 | K1 | K0 | Pressed key code (`0x0`..`0xF`). |
+| `F6` | **GPO_AUD** | R/W | `GPO_3` | `GPO_2` | `GPO_1` | `AUD` | `Bit 0`: Speaker (1=On). `Bits 1..3`: General Purpose Output lines. |
+| `F7` | **RNG** | R | R3 | R2 | R1 | R0 | Random Number Generator. |
+| `FE` | **SPC_L** | R/W | S3 | S2 | S1 | S0 | Low nibble of Shadow PC (debugging/kernel). |
+| `FF` | **SPC_H** | R/W | S7 | S6 | S5 | S4 | High nibble of Shadow PC (debugging/kernel). |
+
 ## 6. System Reset & Interrupt Logic
 
 ### Hardware Reset Sequence
