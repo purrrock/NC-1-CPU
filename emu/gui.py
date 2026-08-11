@@ -151,7 +151,7 @@ class GUI(QWidget):
         # --- Группа 2: Периферия (Дисплеи, Клавиатура, Аудио) ---
         mid_hw_layout = QHBoxLayout()
         
-        font_id = QFontDatabase.addApplicationFont("assets/Segment7Standard.otf")
+        font_id = QFontDatabase.addApplicationFont("emu/assets/Segment7Standard.otf")
         if font_id != -1:
             family = QFontDatabase.applicationFontFamilies(font_id)[0]
             seg_font = QFont(family, 18)
