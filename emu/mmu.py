@@ -115,11 +115,19 @@ class MMU:
         self.spc_h = 0
         # ROM and RAM contents are usually preserved across resets in hardware,
         # but zeroing RAM might be useful. For now, keep them intact like real memory.
-    def hardware_inject_key(self, scancode: int):
+    def hardware_inject_key_press(self, scancode: int):
         """Имитация аппаратного прерывания от контроллера клавиатуры (Key Pressed)"""
         self.kbd_code = scancode & 0x0F
         self.kbd_stat = 1
 
-    def hardware_release_key(self):
+    def hardware_inject_key_release(self):
         """Имитация снятия сигнала удержания клавиши (Key Released)"""
         self.kbd_stat = 0
+        
+    def clear_rom(self):
+        """Fills ROM bank with zeros."""
+        self.rom = [0] * 256
+
+    def clear_ram(self):
+        """Fills RAM bank with zeros."""
+        self.ram = [0] * 256

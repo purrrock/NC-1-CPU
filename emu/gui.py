@@ -37,6 +37,29 @@ class GUI(QWidget):
                 border: 2px inset gray;
                 background-color: darkgray;
             }
+            /* Новые стили для вкладок Memory Viewer */
+QTabWidget::pane {
+    border-top: 2px solid #8F8F91;
+}
+QTabBar::tab {
+    background: lightgray;
+    border: 2px solid #8F8F91;
+    border-bottom-color: #8F8F91;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    color: black;
+}
+QTabBar::tab:selected {
+    background: #F0F0F0;
+    border-color: #8F8F91;
+    border-bottom-color: #F0F0F0; /* Слияние с панелью */
+    font-weight: bold;
+    color: darkblue;
+    margin-top: -2px; /* Эффект выпуклости (поднятие) */
+}
+QTabBar::tab:!selected {
+    margin-top: 2px; /* Опускание неактивной вкладки */
+}
         """)
 
         # -------------------------------------------------------------
@@ -52,7 +75,7 @@ class GUI(QWidget):
         self.editor = QPlainTextEdit()
         mono_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         self.editor.setFont(mono_font)
-        self.editor.setMinimumSize(250, 400)
+        self.editor.setMinimumSize(200, 400)
         editor_layout.addWidget(self.editor)
 
         editor_ctrl_layout = QGridLayout()
@@ -70,6 +93,14 @@ class GUI(QWidget):
         btn_asm_ram.clicked.connect(self.assemble_to_ram)
         editor_ctrl_layout.addWidget(btn_asm_rom, 1, 0)
         editor_ctrl_layout.addWidget(btn_asm_ram, 1, 1)
+
+        # Добавление кнопок очистки памяти
+        btn_clear_rom = QPushButton("Clear ROM")
+        btn_clear_rom.clicked.connect(self.clear_rom)
+        btn_clear_ram = QPushButton("Clear RAM")
+        btn_clear_ram.clicked.connect(self.clear_ram)
+        editor_ctrl_layout.addWidget(btn_clear_rom, 2, 0)
+        editor_ctrl_layout.addWidget(btn_clear_ram, 2, 1)
 
         editor_layout.addLayout(editor_ctrl_layout)
         left_layout.addWidget(editor_group)
@@ -115,17 +146,29 @@ class GUI(QWidget):
         reg_group = QGroupBox("Registers (Hex)")
         reg_layout = QGridLayout(reg_group)
 
+        # Выделенный шрифт для значений регистров
+        reg_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        reg_font.setPointSize(16)
+        
         self.reg_labels = {}
-        for i, reg in enumerate(["A", "B", "X", "Y", "SP", "FL", "PCH", "PCL", "PC"]):
+        
+        # Топология регистров: (Name, Row, Column)
+        reg_positions = [
+            ("A",   0, 0), ("B",   0, 2), ("SP", 0, 4), ("FL", 0, 6),
+            ("X",   1, 0), ("Y",   1, 2), ("XY", 1, 4),
+            ("PCH", 2, 0), ("PCL", 2, 2), ("PC", 2, 4)
+        ]
+
+        for reg, row, col in reg_positions:
             lbl_name = QLabel(f"{reg}:")
             lbl_val = QLabel("0")
-            lbl_val.setFont(mono_font)
-            lbl_val.setStyleSheet("color: red; background-color: black; font-weight: bold; padding: 2px;")
+            lbl_val.setFont(reg_font)
+            lbl_val.setStyleSheet("color: red; background-color: black; font-weight: bold; padding: 2px 5px;")
             lbl_val.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl_val.setMinimumWidth(30)
+            lbl_val.setMinimumWidth(40) # Гарантирует корректное выравнивание двузначных регистров
 
-            reg_layout.addWidget(lbl_name, i // 3, (i % 3) * 2, alignment=Qt.AlignmentFlag.AlignRight)
-            reg_layout.addWidget(lbl_val, i // 3, (i % 3) * 2 + 1)
+            reg_layout.addWidget(lbl_name, row, col, alignment=Qt.AlignmentFlag.AlignRight)
+            reg_layout.addWidget(lbl_val, row, col + 1)
             self.reg_labels[reg] = lbl_val
 
         top_hw_layout.addWidget(reg_group)
@@ -141,7 +184,6 @@ class GUI(QWidget):
             led.setFixedSize(16, 16)
             led.setStyleSheet("background-color: gray; border-radius: 8px;")
 
-            # Allow flag toggling via mouse click
             def make_toggle(f):
                 return lambda event: self.toggle_flag(f)
             led.mousePressEvent = make_toggle(flag)
@@ -160,10 +202,10 @@ class GUI(QWidget):
         font_id = QFontDatabase.addApplicationFont("emu/assets/Segment7Standard.otf")
         if font_id != -1:
             family = QFontDatabase.applicationFontFamilies(font_id)[0]
-            seg_font = QFont(family, 27)
+            seg_font = QFont(family, 48)
         else:
             seg_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
-            seg_font.setPointSize(27)
+            seg_font.setPointSize(48)
 
         mmio_group = QGroupBox("MMIO Displays (F3-F0)")
         mmio_layout = QHBoxLayout(mmio_group)
@@ -196,18 +238,11 @@ class GUI(QWidget):
         keypad_layout = QGridLayout(keypad_group)
         self.keys = {}
 
-        # Подменяем методы в соответствии с требованиями, чтобы не трогать mmu.py, но интерфейс был нужным
-        if hasattr(self.cpu.mmu, 'hardware_inject_key') and not hasattr(self.cpu.mmu, 'hardware_inject_key_press'):
-            self.cpu.mmu.hardware_inject_key_press = self.cpu.mmu.hardware_inject_key
-        if hasattr(self.cpu.mmu, 'hardware_release_key') and not hasattr(self.cpu.mmu, 'hardware_inject_key_release'):
-            self.cpu.mmu.hardware_inject_key_release = self.cpu.mmu.hardware_release_key
-
         for r in range(4):
             for c in range(4):
                 val = r * 4 + c
                 btn = QPushButton(f"{val:X}")
                 btn.setFixedSize(40, 30)
-                # Матричная клавиатура (F4-F5): сигналы pressed и released -> hardware_inject_key_press/release
                 btn.pressed.connect(lambda v=val: self.cpu.mmu.hardware_inject_key_press(v))
                 btn.released.connect(lambda: self.cpu.mmu.hardware_inject_key_release())
                 keypad_layout.addWidget(btn, r, c)
@@ -256,14 +291,13 @@ class GUI(QWidget):
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 tree.setItem(r, c, item)
 
-        # Настраиваем размеры ячеек
         header = tree.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         header.setDefaultSectionSize(22)
         header.setMinimumSectionSize(22)
 
         vheader = tree.verticalHeader()
-        vheader.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        vheader.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         vheader.setDefaultSectionSize(20)
         vheader.setMinimumSectionSize(20)
 
@@ -332,7 +366,12 @@ class GUI(QWidget):
         self.reg_labels["B"].setText(f"{regs.b:X}")
         self.reg_labels["X"].setText(f"{regs.x:X}")
         self.reg_labels["Y"].setText(f"{regs.y:X}")
-        self.reg_labels["SP"].setText(f"{regs.sp:X}")
+        self.reg_labels["XY"].setText(f"{(regs.x << 4) | regs.y:02X}")
+        
+        # Аппаратное проецирование SP на страницу 0xE0 (согласно спецификации v4.2)
+        # Указатель стека 4-битный, физический адрес вычисляется через базовый сдвиг.
+        self.reg_labels["SP"].setText(f"{0xE0 | regs.sp:02X}")
+        
         self.reg_labels["FL"].setText(f"{regs.fl:X}")
         self.reg_labels["PCH"].setText(f"{regs.pch:X}")
         self.reg_labels["PCL"].setText(f"{regs.pcl:X}")
@@ -416,6 +455,22 @@ class GUI(QWidget):
             QMessageBox.information(self, "Success", f"Assembled {len(prog)} nibbles to RAM.")
         except AssemblerError as e:
             QMessageBox.critical(self, "Assembler Error", str(e))
+
+    def clear_rom(self):
+        """Прямая очистка системного банка (ROM) с отказоустойчивостью."""
+        if hasattr(self.cpu.mmu, 'clear_rom'):
+            self.cpu.mmu.clear_rom()
+        else:
+            self.cpu.mmu.rom = [0] * 256
+        self.update_ui()
+
+    def clear_ram(self):
+        """Прямая очистка пользовательского банка (RAM) с отказоустойчивостью."""
+        if hasattr(self.cpu.mmu, 'clear_ram'):
+            self.cpu.mmu.clear_ram()
+        else:
+            self.cpu.mmu.ram = [0] * 256
+        self.update_ui()
 
     def step(self):
         if not self.cpu.halted:
