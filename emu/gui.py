@@ -143,6 +143,9 @@ class GUI:
         mem_frame = ttk.LabelFrame(right_panel, text="Memory Viewer")
         mem_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
+        self.disasm_label = ttk.Label(mem_frame, text="00: NOP", font=("Courier New", 10, "bold"), foreground="blue")
+        self.disasm_label.pack(side=tk.TOP, anchor=tk.E, padx=5)
+
         self.notebook = ttk.Notebook(mem_frame)
         self.notebook.pack(fill=tk.BOTH, expand=True)
 
@@ -179,6 +182,51 @@ class GUI:
             tree.insert("", "end", iid=row_id, text=row_id, values=(["0"]*16))
 
         return tree
+
+    def disassemble_current_instruction(self):
+        regs = self.cpu.regs
+        pc = regs.pc
+        m_flag = regs.get_flag_m()
+        read = lambda addr: self.cpu.mmu.read(addr, m_flag)
+
+        REG_MAP = {0: "A", 1: "B", 2: "X", 3: "Y", 4: "SP", 5: "FL", 6: "PCH", 7: "PCL"}
+
+        opcode = read(pc)
+        if opcode == 0x0: return "NOP"
+        elif opcode == 0x3: return "LDR"
+        elif opcode == 0x4: return "STR"
+        elif opcode == 0x1:
+            imm = read((pc + 1) & 0xFF)
+            return f"LDI 0x{imm:X}"
+        elif opcode == 0x2:
+            op = read((pc + 1) & 0xFF)
+            d = (op >> 3) & 1
+            r = op & 0x07
+            reg_name = REG_MAP.get(r, f"R{r}")
+            if d == 0:
+                return f"MOV A, {reg_name}"
+            else:
+                return f"MOV {reg_name}, A"
+        elif opcode in (0x5, 0x6, 0x7, 0x8, 0x9, 0xA):
+            mnemonics = {0x5: "ADD", 0x6: "SUB", 0x7: "AND", 0x8: "XOR", 0x9: "INC", 0xA: "DEC"}
+            op = read((pc + 1) & 0xFF)
+            r = op & 0x07
+            reg_name = REG_MAP.get(r, f"R{r}")
+            return f"{mnemonics[opcode]} {reg_name}"
+        elif opcode in (0xB, 0xC, 0xD, 0xE):
+            mnemonics = {0xB: "JZ", 0xC: "JC", 0xD: "JMP", 0xE: "CAL"}
+            h = read((pc + 1) & 0xFF)
+            l = read((pc + 2) & 0xFF)
+            addr = (h << 4) | l
+            return f"{mnemonics[opcode]} 0x{addr:02X}"
+        elif opcode == 0xF:
+            func = read((pc + 1) & 0xFF)
+            if func == 0x0: return "HLT"
+            elif func == 0x1: return "RET"
+            elif func == 0x4: return "SWI"
+            elif func == 0x5: return "RETU"
+            else: return f"SYS 0x{func:X}"
+        return f"UNK 0x{opcode:X}"
 
     def update_ui(self):
         regs = self.cpu.regs
@@ -218,6 +266,9 @@ class GUI:
             self.notebook.select(self.rom_tree)
         else:
             self.notebook.select(self.ram_tree)
+
+        disasm_text = self.disassemble_current_instruction()
+        self.disasm_label.config(text=f"[{pc:02X}] {disasm_text}")
 
     def update_mem_tree(self, tree, bank_flag, highlight_pc):
         for r in range(16):
