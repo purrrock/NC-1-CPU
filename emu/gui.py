@@ -140,6 +140,12 @@ class GUI(QWidget):
             led = QLabel()
             led.setFixedSize(16, 16)
             led.setStyleSheet("background-color: gray; border-radius: 8px;")
+
+            # Allow flag toggling via mouse click
+            def make_toggle(f):
+                return lambda event: self.toggle_flag(f)
+            led.mousePressEvent = make_toggle(flag)
+
             flag_vbox.addWidget(lbl_name)
             flag_vbox.addWidget(led, alignment=Qt.AlignmentFlag.AlignCenter)
             flags_layout.addLayout(flag_vbox)
@@ -154,10 +160,10 @@ class GUI(QWidget):
         font_id = QFontDatabase.addApplicationFont("assets/Segment7Standard.otf")
         if font_id != -1:
             family = QFontDatabase.applicationFontFamilies(font_id)[0]
-            seg_font = QFont(family, 18)
+            seg_font = QFont(family, 27)
         else:
             seg_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
-            seg_font.setPointSize(18)
+            seg_font.setPointSize(27)
 
         mmio_group = QGroupBox("MMIO Displays (F3-F0)")
         mmio_layout = QHBoxLayout(mmio_group)
@@ -252,13 +258,28 @@ class GUI(QWidget):
 
         # Настраиваем размеры ячеек
         header = tree.horizontalHeader()
-        for i in range(16):
-            header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        header.setDefaultSectionSize(22)
+        header.setMinimumSectionSize(22)
+
         vheader = tree.verticalHeader()
-        for i in range(16):
-            vheader.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
+        vheader.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        vheader.setDefaultSectionSize(20)
+        vheader.setMinimumSectionSize(20)
 
         return tree
+
+    def toggle_flag(self, flag):
+        regs = self.cpu.regs
+        if flag == "R":
+            regs.set_flag_r(not regs.get_flag_r())
+        elif flag == "M":
+            regs.set_flag_m(not regs.get_flag_m())
+        elif flag == "C":
+            regs.set_flag_c(not regs.get_flag_c())
+        elif flag == "Z":
+            regs.set_flag_z(not regs.get_flag_z())
+        self.update_ui()
 
     def disassemble_current_instruction(self):
         regs = self.cpu.regs
@@ -353,12 +374,16 @@ class GUI(QWidget):
                 val = self.cpu.mmu.read(idx, bank_flag)
                 val_str = f"{val:X}"
                 
-                if idx == highlight_pc:
+                is_highlighted = (idx == highlight_pc)
+                if is_highlighted:
                     val_str = f"[{val_str}]"
 
                 item = tree.item(r, c)
                 if item:
                     item.setText(val_str)
+                    font = item.font()
+                    font.setBold(is_highlighted)
+                    item.setFont(font)
 
     def load_code(self):
         filepath, _ = QFileDialog.getOpenFileName(self, "Open Assembly", "", "Assembly (*.asm);;All Files (*.*)")
