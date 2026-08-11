@@ -26,6 +26,18 @@ class GUI(QWidget):
 
     def setup_ui(self):
         main_layout = QHBoxLayout(self)
+        self.setStyleSheet("""
+            QPushButton {
+                border: 2px outset gray;
+                background-color: lightgray;
+                border-radius: 4px;
+                padding: 5px;
+            }
+            QPushButton:pressed {
+                border: 2px inset gray;
+                background-color: darkgray;
+            }
+        """)
 
         # -------------------------------------------------------------
         # Left Panel: Инструменты разработки (Редактор, Управление)
@@ -139,14 +151,22 @@ class GUI(QWidget):
         # --- Группа 2: Периферия (Дисплеи, Клавиатура, Аудио) ---
         mid_hw_layout = QHBoxLayout()
         
+        font_id = QFontDatabase.addApplicationFont("assets/Segment7Standard.otf")
+        if font_id != -1:
+            family = QFontDatabase.applicationFontFamilies(font_id)[0]
+            seg_font = QFont(family, 18)
+        else:
+            seg_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+            seg_font.setPointSize(18)
+
         mmio_group = QGroupBox("MMIO Displays (F3-F0)")
         mmio_layout = QHBoxLayout(mmio_group)
         self.mmio_labels = []
         for i in range(4):
             disp_vbox = QVBoxLayout()
             lbl_val = QLabel("0")
-            lbl_val.setFont(mono_font)
-            lbl_val.setStyleSheet("color: red; background-color: black; font-size: 18pt; font-weight: bold; padding: 5px;")
+            lbl_val.setFont(seg_font)
+            lbl_val.setStyleSheet("color: red; background-color: black; padding: 5px;")
             lbl_val.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl_name = QLabel(f"F{3-i}")
             lbl_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -233,10 +253,10 @@ class GUI(QWidget):
         # Настраиваем размеры ячеек
         header = tree.horizontalHeader()
         for i in range(16):
-            header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
+            header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
         vheader = tree.verticalHeader()
         for i in range(16):
-            vheader.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
+            vheader.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
 
         return tree
 
