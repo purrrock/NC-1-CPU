@@ -1,291 +1,171 @@
-# NC-1 Microprocessor Technical Specification
+# NC-1 MICROPROCESSOR TECHNICAL SPECIFICATION
 
-**Version:** 4.0 (Final Release)  
+**Version:** 4.1 (Cross-bank Access Update)
 **Architecture:** 4-bit RISC / Modified Harvard
+**Date:** 2026
 
----
+## 1. General Description
+The **NC-1** is a 4-bit microprocessor with 8-bit addressing, designed for embedded systems and educational hardware projects. The architecture is optimized for minimal logic gate count while maintaining high programming flexibility.
 
-# 1. General Description
+Key Features:
+* **Orthogonal Register File:** Direct access to Program Counter (PC), Stack Pointer (SP), and Status Flags as standard registers.
+* **Dual-Bank Memory Architecture:** Separate System (ROM) and User (RAM) banks with hardware privilege protection.
+* **Symmetric Cross-Bank Access (`LDRA`):** High-speed 2-cycle data fetching across memory banks without mode switching overhead.
+* **Single Entry Point Vector:** Simplified reset and interrupt handling via status flags.
+* **Hardware Stack Support:** Hardware-assisted subroutine call/return flow (`CAL` / `RET`).
 
-The **NC-1** is a 4-bit microprocessor with an 8-bit address space, designed for embedded systems and educational purposes. The architecture is optimized to minimize logic gate count while maintaining programming flexibility.
+## 2. Hardware Architecture
 
-## Key Features
+### 2.1. Buses and Bit Widths
+* **Data Bus:** 4-bit (Nibble). Value range: `0..15` (`0x0..0xF`).
+* **Address Bus:** 8-bit. Addressable space: 256 nibbles per bank (512 nibbles total).
 
-- **Orthogonal Register File:** Direct access to the Program Counter (PC), Stack Pointer (SP), and Flags as ordinary registers.
-- **Dual-Bank Memory:** Separation of System (ROM) and User (RAM) memory with hardware protection.
-- **Unified Entry Vector:** Simplified reset and interrupt handling through a status flag.
-- **Hardware Stack:** Supports nested subroutine calls.
+### 2.2. Register Map
+The CPU features 8 internal registers addressed by a 3-bit identifier (`000`..`111`).
 
----
+| ID (Bin) | Mnemonic | Purpose | Access Notes |
+| :--- | :--- | :--- | :--- |
+| **000** | **A** | Accumulator | Primary register for ALU and I/O operations. |
+| **001** | **B** | Aux / General | General-purpose auxiliary register. |
+| **010** | **X** | Index High | High nibble of address for indirect access. |
+| **011** | **Y** | Index Low | Low nibble of address for indirect access. |
+| **100** | **SP** | Stack Pointer | Stack pointer. Decrements on `PUSH`/`CAL`. |
+| **101** | **FL** | Flags | Status register (see Section 2.3). |
+| **110** | **PCH** | PC High | High nibble of Program Counter. |
+| **111** | **PCL** | PC Low | **Write:** Triggers immediate jump to `PCH:NewPCL`. |
 
-# 2. Hardware Architecture
+*Note:* Writing to `PCL` updates the low nibble of the PC and triggers an immediate branch. Reading `PCL` returns the current instruction address offset.
 
-## 2.1 Buses and Data Width
-
-- **Data Bus:** 4 bits (Nibble)
-  - Value range: `0...15` (`0x0...0xF`)
-- **Address Bus:** 8 bits
-  - Address space: 256 nibbles per memory bank
-
----
-
-## 2.2 Register Map
-
-The processor contains eight registers addressed by a 3-bit identifier (`000...111`).
-
-| ID (Bin) | Mnemonic | Description | Access Notes |
-|----------|-----------|-------------|--------------|
-| 000 | A | Accumulator | Primary register for ALU and I/O operations |
-| 001 | B | Auxiliary / General Purpose | General-purpose register |
-| 010 | X | Index High | High nibble of indirect address |
-| 011 | Y | Index Low | Low nibble of indirect address |
-| 100 | SP | Stack Pointer | Decremented by `PUSH` and `CAL` |
-| 101 | FL | Flags | Flags register (see Section 2.3) |
-| 110 | PCH | PC High | High nibble of Program Counter |
-| 111 | PCL | PC Low | Writing causes an immediate jump to `PCH:NewPCL` |
-
-**Note:** Writing to `PCL` updates the low address nibble and immediately flushes the instruction pipeline (jump). Reading `PCL` returns the current address plus the instruction fetch offset.
-
----
-
-## 2.3 Flags Register (FLAGS)
-
-Width: **4 bits**
+### 2.3. Flag Register (FLAGS / FL)
+Width: 4 bits.
 
 | Bit 3 (MSB) | Bit 2 | Bit 1 | Bit 0 (LSB) |
-|-------------|--------|--------|-------------|
-| R (Reset) | M (Mode) | C (Carry) | Z (Zero) |
+| :--- | :--- | :--- | :--- |
+| **R** (Reset) | **M** (Mode) | **C** (Carry) | **Z** (Zero) |
 
-### Flag Definitions
+* **R (Reset Latch):** Hardware set to `1` on power-on or hard reset. Cleared only via software (writing `0` to bit 3). Used to distinguish cold boot from software syscalls.
+* **M (System Mode):** `1` = System Bank (ROM / OS) active. `0` = User Bank (RAM) active.
+* **C (Carry):** Arithmetic carry/borrow flag.
+* **Z (Zero):** Arithmetic zero flag.
 
-- **R (Reset Latch)**
-  - Set to `1` by hardware after power-on or reset.
-  - Cleared only by software (writing `0`).
-  - Used to distinguish between a cold boot and a system call.
+## 3. Memory Organization & Cross-Bank Logic
 
-- **M (System Mode)**
-  - `1` = ROM bank active (Operating System)
-  - `0` = RAM bank active (User program)
+### 3.1. Memory Banks
+The CPU addresses a 256-nibble window (`00..FF`), switched according to the **M** flag and instruction context.
 
-- **C (Carry)**
-  - Carry/Borrow flag.
+1. **System Bank (ROM):** Active when `M=1`. Contains OS code, monitor firmware, and system drivers.
+2. **User Bank (RAM):** Active when `M=0`. Contains user program code and runtime data.
 
-- **Z (Zero)**
-  - Set when the ALU result equals zero.
+### 3.2. Access Logic & Cross-Bank Read (`LDRA`)
+* **Write Operations (`STR`):** Always target **RAM** (User Bank) regardless of mode ("Shadow Write").
+* **Read Operations (`LDR` vs `LDRA`):** Selected hardware target bank for reads is determined by a XOR operation:
+  
+  $$\text{Target\_Bank\_Read} = M \oplus \text{Is\_SYS\_6}$$
 
----
+  where `Is_SYS_6` is `1` when executing `SYS 6` (`LDRA`), and `0` otherwise.
 
-# 3. Memory Model
+#### Read Target Truth Table:
+| Current Mode (M) | Instruction | Is_SYS_6 | Selected Read Bank | Usage Scenario |
+| :--- | :--- | :--- | :--- | :--- |
+| `1` (ROM / Kernel) | `LDR` | `0` | **ROM (`1`)** | OS reads kernel code/constants |
+| `1` (ROM / Kernel) | `LDRA` | `1` | **RAM (`0`)** | OS reads user buffers / zero-page variables |
+| `0` (RAM / User) | `LDR` | `0` | **RAM (`0`)** | User reads local variables |
+| `0` (RAM / User) | `LDRA` | `1` | **ROM (`1`)** | User reads OS fonts/math lookup tables |
 
-## 3.1 Memory Banks
+### 3.3. Memory Map
+Unified layout across both banks (`00`..`FF`).
 
-The processor always sees a single address window (`00...FF`). The active bank depends on the **M** flag.
+| Address (HEX) | Region | Description |
+| :--- | :--- | :--- |
+| **00 - 0F** | **Vectors / Zero Page** | `00`: Unified Entry Point (Reset & Syscall). `01-0F`: OS zero-page variables. |
+| **10 - CF** | **Program Space** | Primary user/kernel code space (192 nibbles). |
+| **D0 - EF** | **Stack / Data** | Hardware stack space (grows down from EF) and buffers. |
+| **F0 - FF** | **MMIO Ports** | Memory-mapped I/O peripherals (see Section 5). |
 
-### System Bank (ROM)
+## 4. Instruction Set Architecture (ISA)
 
-- Active when `M = 1`
-- Contains:
-  - Operating System
-  - Monitor
-  - Drivers
-- Read-only for the CPU (except MMIO)
+All instructions have variable length (1, 2, or 3 nibbles).
 
-### User Bank (RAM)
+### Master Opcode Table
 
-- Active when `M = 0`
-- Stores user code and data.
+| Op | Mnemonic | Arguments | Size (Nibbles) | Action Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **0** | `NOP` | - | 1 | No operation. |
+| **1** | `LDI` | Imm (4b) | 2 | `A = Imm` |
+| **2** | `MOV` | Mode+Reg | 2 | Register transfer (see Section 4.1). |
+| **3** | `LDR` | - | 1 | `A = CurrentBank[X:Y]` (Indirect load from active bank) |
+| **4** | `STR` | - | 1 | `RAM[X:Y] = A` (Shadow write to RAM) |
+| **5** | `ADD` | Reg (3b) | 2 | `A = A + Reg` |
+| **6** | `SUB` | Reg (3b) | 2 | `A = A - Reg` |
+| **7** | `AND` | Reg (3b) | 2 | `A = A & Reg` |
+| **8** | `XOR` | Reg (3b) | 2 | `A = A ^ Reg` |
+| **9** | `INC` | Reg (3b) | 2 | `Reg = Reg + 1` |
+| **A** | `DEC` | Reg (3b) | 2 | `Reg = Reg - 1` |
+| **B** | `JZ` | Addr (8b) | 3 | If `Z=1`, `PC = Addr` |
+| **C** | `JC` | Addr (8b) | 3 | If `C=1`, `PC = Addr` |
+| **D** | `JMP` | Addr (8b) | 3 | `PC = Addr` (Unconditional Jump) |
+| **E** | `CAL` | Addr (8b) | 3 | `PUSH PCH`, `PUSH PCL`, `PC = Addr` |
+| **F** | `SYS` | Func (4b) | 2 | System functions (see Section 4.2). |
 
----
+### 4.1. MOV Format (Opcode 2)
+Argument (2nd nibble) structure: `D R R R`.
+* **D (Direction):**
+  * `0`: `MOV A, Reg` (Read Reg into A).
+  * `1`: `MOV Reg, A` (Write A into Reg).
+* **RRR:** Register ID (`000`..`111`).
 
-## 3.2 Memory Access Logic (Shadow Write)
+### 4.2. SYS Functions (Opcode F)
+* `F0`: **HLT** (Halt CPU until hardware reset).
+* `F1`: **RET** (Subroutine return: `POP PCL`, `POP PCH`).
+* `F4`: **SWI** (Software Interrupt / Syscall).
+  * Action: `SPC = PC` (save return address), `M = 1` (kernel mode), `PC = 0` (jump to entry point).
+* `F5`: **RETU** (Return to User mode).
+  * Action: `PC = SPC`, `M = 0`.
+* `F6`: **LDRA** (Load Alternate Bank).
+  * Action: `A = AlternateBank[X:Y]`. Reads from opposite bank using `Target_Bank = M ⊕ 1`.
 
-### Read (`LDR`)
-
-Reads from the currently selected bank according to the **M** flag.
-
-### Write (`STR`)
-
-Writes are **always performed to RAM**, regardless of the current mode.
-
-This allows the operating system to load user programs while executing from ROM.
-
----
-
-## 3.3 Memory Map
-
-The same address map applies to both memory banks.
-
-| Address | Region | Description |
-|----------|---------|-------------|
-| `00–0F` | Vectors / Zero Page | `00`: Unified entry point (Reset & System Call) |
-| `10–CF` | Program Space | Main program area (192 nibbles) |
-| `D0–EF` | Stack / Data | Stack (grows downward from `EF`) and data buffers |
-| `F0–FF` | MMIO Ports | Memory-mapped I/O (see Section 5) |
-
----
-
-# 4. Instruction Set Architecture (ISA)
-
-All instructions have variable length:
-
-- 1 nibble
-- 2 nibbles
-- 3 nibbles
-
-## Opcode Table
-
-| Op | Mnemonic | Arguments | Size | Operation |
-|----|-----------|-----------|------|-----------|
-| 0 | NOP | — | 1 | No operation |
-| 1 | LDI | Imm (4-bit) | 2 | `A = Imm` |
-| 2 | MOV | Mode + Reg | 2 | Register transfer |
-| 3 | LDR | — | 1 | `A = Memory[X:Y]` |
-| 4 | STR | — | 1 | `Memory[X:Y] = A` |
-| 5 | ADD | Reg | 2 | `A = A + Reg` |
-| 6 | SUB | Reg | 2 | `A = A - Reg` |
-| 7 | AND | Reg | 2 | `A = A & Reg` |
-| 8 | XOR | Reg | 2 | `A = A ^ Reg` |
-| 9 | INC | Reg | 2 | `Reg = Reg + 1` |
-| A | DEC | Reg | 2 | `Reg = Reg - 1` |
-| B | JZ | Addr (8-bit) | 3 | If `Z = 1`, `PC = Addr` |
-| C | JC | Addr (8-bit) | 3 | If `C = 1`, `PC = Addr` |
-| D | JMP | Addr (8-bit) | 3 | Unconditional jump |
-| E | CAL | Addr (8-bit) | 3 | `PUSH PCH`, `PUSH PCL`, `PC = Addr` |
-| F | SYS | Function | 2 | System functions |
-
----
-
-## 4.1 MOV Instruction Format
-
-The second nibble has the following layout:
-
-```
-D R R R
-```
-
-### D — Direction
-
-- `0` → `MOV A, Reg` (Read register into A)
-- `1` → `MOV Reg, A` (Write A into register)
-
-### RRR
-
-Register ID (`0...7`)
-
----
-
-## 4.2 System Functions (`SYS`)
-
-| Opcode | Function | Description |
-|---------|----------|-------------|
-| F0 | HLT | Halt processor until reset |
-| F1 | RET | Return from subroutine (`POP PCL`, `POP PCH`) |
-| F4 | SWI | System Call |
-| F5 | RETU | Return to User mode |
-
-### SWI (F4)
-
-Operation:
-
-- `SPC = PC`
-- `M = 1`
-- `PC = 0`
-
-Execution continues from the ROM entry point.
-
-### RETU (F5)
-
-Operation:
-
-- `PC = SPC`
-- `M = 0`
-
-Returns execution to the user program.
-
----
-
-# 5. Memory-Mapped I/O (MMIO)
-
-Devices are mapped to addresses `F0...FF`.
-
-Writes always succeed. Reads depend on device state.
+## 5. Memory-Mapped I/O Subsystem (MMIO)
+Peripherals are mapped to addresses `F0`..`FF`. Writes are directed to RAM/Peripherals; reads query device status.
 
 | Address | Name | R/W | Description |
-|----------|------|-----|-------------|
-| F0 | DISP_0 | W | Right hexadecimal display |
-| F1 | DISP_1 | W | Display |
-| F2 | DISP_2 | W | Display |
-| F3 | DISP_3 | W | Left hexadecimal display |
-| F4 | KBD_STAT | R | Bit 0: `1 = Key Pressed`, `0 = Released` |
-| F5 | KBD_CODE | R | Key code (`0...F`) |
-| F6 | AUDIO | W | Bit 0: Speaker (`1 = On`, `0 = Off`) |
-| F7 | RNG | R | Random number generator |
-| FE | SPC_L | R/W | Shadow PC Low (OS debugging) |
-| FF | SPC_H | R/W | Shadow PC High |
+| :--- | :--- | :--- | :--- |
+| `F0` | **DISP_0** | W | Rightmost 7-segment hex display. |
+| `F1` | **DISP_1** | W | Display 1. |
+| `F2` | **DISP_2** | W | Display 2. |
+| `F3` | **DISP_3** | W | Leftmost 7-segment hex display. |
+| `F4` | **KBD_STAT** | R | `Bit 0`: 1 = Key pressed, 0 = Released. |
+| `F5` | **KBD_CODE** | R | Pressed key code (`0x0`..`0xF`). |
+| `F6` | **AUDIO** | W | `Bit 0`: Speaker control (1=On, 0=Off). |
+| `F7` | **RNG** | R | Random Number Generator. |
+| `FE` | **SPC_L** | R/W | Low nibble of Shadow PC (debugging/kernel). |
+| `FF` | **SPC_H** | R/W | High nibble of Shadow PC (debugging/kernel). |
 
----
+## 6. System Reset & Interrupt Logic
 
-# 6. Reset and Initialization Logic
+### Hardware Reset Sequence
+1. Assert `Reset` signal to CPU.
+2. Internal registers reset: `PC = 00`, `SP = 00`.
+3. Status flags set: **`R = 1`**, `M = 1` (System Mode).
+4. Execution starts at address `00` in ROM.
 
-## Hardware Reset
-
-When the CPU Reset signal is asserted:
-
-1. Registers are initialized:
-   - `PC = 00`
-   - `SP = 00`
-2. Flags are initialized:
-   - `R = 1`
-   - `M = 1` (System Mode)
-3. Execution begins at ROM address `00`.
-
----
-
-## Entry Point (`0x00`)
-
-Example ROM dispatcher:
+### Entry Point Dispatcher (`0x00`)
+Example kernel dispatcher code in ROM:
 
 ```asm
-00: MOV A, FL        ; Read flags
-02: AND 8            ; Test R bit (1000b)
-04: JZ HANDLER       ; R=0 -> System Call
-06: ...              ; R=1 -> Cold Boot initialization
+00: 2 (MOV) 0 101   ; MOV A, FL (Read flags)
+02: 7 (AND) 8       ; Mask bit R (8 = 1000b)
+04: B (JZ)  HANDLER ; If R=0, jump to Syscall Handler
+06: ...             ; If R=1, execute Cold Boot sequence
 ```
 
----
+### Appendix A: Cross-Bank Call & Read Example
+**Scenario:** OS kernel (`M=1`) reads user parameters from Zero Page (`RAM[0x05]`) using `LDRA`.
 
-# Appendix A — Example System Call Flow
-
-**Task:** A user program calls an operating system function.
-
-1. User program loads arguments into registers and/or memory.
-2. User program executes:
-
-   ```
-   SYS 4    ; SWI
-   ```
-
-   CPU actions:
-
-   - Save return address in `SPC`
-   - Enable ROM (`M = 1`)
-   - Jump to address `00`
-
-3. Operating System (address `00`)
-   - Checks flag `R`
-   - Since `R = 0`, branches to `HANDLER`
-
-4. Handler performs the requested service.
-
-5. Operating System executes:
-
-   ```
-   SYS 5    ; RETU
-   ```
-
-   CPU actions:
-
-   - Restore `PC` from `SPC`
-   - Enable RAM (`M = 0`)
-
-6. User program resumes execution.
+```asm
+; Kernel executing in ROM (M=1)
+00: 1 (LDI) 0       ; A = 0
+02: 2 (MOV) 1 010   ; MOV X, A (X = 0)
+04: 1 (LDI) 5       ; A = 5
+06: 2 (MOV) 1 011   ; MOV Y, A (Y = 5, address = 0x05)
+08: F (SYS) 6       ; LDRA (Opcode F6) -> Reads RAM[0x05] into A
+```
