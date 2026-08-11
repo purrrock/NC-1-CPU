@@ -1,185 +1,242 @@
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+import sys
+from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QGroupBox,
+                             QPlainTextEdit, QPushButton, QLabel, QSpinBox,
+                             QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
+                             QFileDialog, QMessageBox, QGridLayout)
+from PyQt6.QtGui import QFontDatabase, QFont
+from PyQt6.QtCore import QTimer, Qt
 from .cpu import CPU
 from .assembler import Assembler, AssemblerError
 
-class GUI:
-    def __init__(self, root: tk.Tk, cpu: CPU):
-        self.root = root
-        self.root.title("NC-1 Debug Board")
+class GUI(QWidget):
+    def __init__(self, cpu: CPU):
+        super().__init__()
+        self.setWindowTitle("NC-1 Debug Board")
         self.cpu = cpu
         self.assembler = Assembler()
 
         self.is_running = False
-        self.run_job = None
+
+        # Таймер для Event Model
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.run_loop)
 
         self.setup_ui()
         self.update_ui()
 
     def setup_ui(self):
-        main_frame = ttk.Frame(self.root, padding=10)
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        main_layout = QHBoxLayout(self)
 
         # -------------------------------------------------------------
         # Left Panel: Инструменты разработки (Редактор, Управление)
         # -------------------------------------------------------------
-        left_panel = ttk.Frame(main_frame)
-        left_panel.pack(side=tk.LEFT, fill=tk.Y, expand=False)
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
 
-        editor_frame = ttk.LabelFrame(left_panel, text="Code Editor")
-        editor_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        editor_group = QGroupBox("Code Editor")
+        editor_layout = QVBoxLayout(editor_group)
 
-        self.editor = tk.Text(editor_frame, width=15, height=20, font=("Courier New", 10))
-        self.editor.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.editor = QPlainTextEdit()
+        mono_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        self.editor.setFont(mono_font)
+        self.editor.setMinimumSize(250, 400)
+        editor_layout.addWidget(self.editor)
 
-        editor_ctrl_frame = ttk.Frame(left_panel)
-        editor_ctrl_frame.pack(fill=tk.X, pady=5)
+        editor_ctrl_layout = QGridLayout()
 
-        row1 = ttk.Frame(editor_ctrl_frame)
-        row1.pack(fill=tk.X, pady=2)
-        ttk.Button(row1, text="Load", command=self.load_code).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
-        ttk.Button(row1, text="Save", command=self.save_code).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        btn_load = QPushButton("Load")
+        btn_load.clicked.connect(self.load_code)
+        btn_save = QPushButton("Save")
+        btn_save.clicked.connect(self.save_code)
+        editor_ctrl_layout.addWidget(btn_load, 0, 0)
+        editor_ctrl_layout.addWidget(btn_save, 0, 1)
 
-        row2 = ttk.Frame(editor_ctrl_frame)
-        row2.pack(fill=tk.X, pady=2)
-        ttk.Button(row2, text="Assemble to ROM", command=self.assemble_to_rom).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
-        ttk.Button(row2, text="Assemble to RAM", command=self.assemble_to_ram).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        btn_asm_rom = QPushButton("Assemble to ROM")
+        btn_asm_rom.clicked.connect(self.assemble_to_rom)
+        btn_asm_ram = QPushButton("Assemble to RAM")
+        btn_asm_ram.clicked.connect(self.assemble_to_ram)
+        editor_ctrl_layout.addWidget(btn_asm_rom, 1, 0)
+        editor_ctrl_layout.addWidget(btn_asm_ram, 1, 1)
 
-        exec_ctrl_frame = ttk.LabelFrame(left_panel, text="Execution")
-        exec_ctrl_frame.pack(fill=tk.X, pady=5)
+        editor_layout.addLayout(editor_ctrl_layout)
+        left_layout.addWidget(editor_group)
 
-        exec_row1 = ttk.Frame(exec_ctrl_frame)
-        exec_row1.pack(fill=tk.X, pady=2)
-        ttk.Button(exec_row1, text="Step", command=self.step).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
-        ttk.Button(exec_row1, text="Run", command=self.run).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
-        ttk.Button(exec_row1, text="Pause", command=self.pause).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        exec_group = QGroupBox("Execution")
+        exec_layout = QGridLayout(exec_group)
 
-        exec_row2 = ttk.Frame(exec_ctrl_frame)
-        exec_row2.pack(fill=tk.X, pady=2)
-        ttk.Button(exec_row2, text="Reset", command=self.reset).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        btn_step = QPushButton("Step")
+        btn_step.clicked.connect(self.step)
+        btn_run = QPushButton("Run")
+        btn_run.clicked.connect(self.run)
+        btn_pause = QPushButton("Pause")
+        btn_pause.clicked.connect(self.pause)
 
-        ttk.Label(exec_row2, text="Delay (ms):").pack(side=tk.LEFT, padx=(10,2))
-        self.delay_var = tk.StringVar(value="50")
-        ttk.Entry(exec_row2, textvariable=self.delay_var, width=5).pack(side=tk.LEFT)
+        exec_layout.addWidget(btn_step, 0, 0)
+        exec_layout.addWidget(btn_run, 0, 1)
+        exec_layout.addWidget(btn_pause, 0, 2)
+
+        btn_reset = QPushButton("Reset")
+        btn_reset.clicked.connect(self.reset)
+        exec_layout.addWidget(btn_reset, 1, 0)
+
+        delay_label = QLabel("Delay (ms):")
+        exec_layout.addWidget(delay_label, 1, 1, alignment=Qt.AlignmentFlag.AlignRight)
+        self.delay_spin = QSpinBox()
+        self.delay_spin.setRange(1, 1000)
+        self.delay_spin.setValue(50)
+        exec_layout.addWidget(self.delay_spin, 1, 2)
+
+        left_layout.addWidget(exec_group)
+        main_layout.addWidget(left_panel)
 
         # -------------------------------------------------------------
         # Right Panel: Аппаратный контекст и Память
         # -------------------------------------------------------------
-        right_panel = ttk.Frame(main_frame)
-        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10,0))
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
 
         # --- Группа 1: Ядро (Регистры и Флаги) ---
-        # Использование side=tk.LEFT в дочерних фреймах позволяет выстроить их в единую горизонтальную строку
-        top_hw_frame = ttk.Frame(right_panel)
-        top_hw_frame.pack(fill=tk.X, pady=5)
+        top_hw_layout = QHBoxLayout()
 
-        reg_frame = ttk.LabelFrame(top_hw_frame, text="Registers (Hex)")
-        # fill=tk.Y гарантирует одинаковую высоту фрейма с соседними элементами по горизонтали
-        reg_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
+        reg_group = QGroupBox("Registers (Hex)")
+        reg_layout = QGridLayout(reg_group)
 
         self.reg_labels = {}
         for i, reg in enumerate(["A", "B", "X", "Y", "SP", "FL", "PCH", "PCL", "PC"]):
-            # Расположение 9 регистров матрицей 3x3 через grid-менеджер
-            ttk.Label(reg_frame, text=f"{reg}:").grid(row=i//3, column=(i%3)*2, padx=5, pady=2, sticky=tk.E)
-            lbl = ttk.Label(reg_frame, text="0", font=("Courier New", 14, "bold"), foreground="red", background="black", width=2, anchor=tk.CENTER)
-            lbl.grid(row=i//3, column=(i%3)*2+1, padx=5, pady=2)
-            self.reg_labels[reg] = lbl
+            lbl_name = QLabel(f"{reg}:")
+            lbl_val = QLabel("0")
+            lbl_val.setFont(mono_font)
+            lbl_val.setStyleSheet("color: red; background-color: black; font-weight: bold; padding: 2px;")
+            lbl_val.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl_val.setMinimumWidth(30)
 
-        flags_frame = ttk.LabelFrame(top_hw_frame, text="Flags")
-        flags_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            reg_layout.addWidget(lbl_name, i // 3, (i % 3) * 2, alignment=Qt.AlignmentFlag.AlignRight)
+            reg_layout.addWidget(lbl_val, i // 3, (i % 3) * 2 + 1)
+            self.reg_labels[reg] = lbl_val
 
-        self.flag_canvas = tk.Canvas(flags_frame, height=30, width=150)
-        # Центрируем Canvas с помощью отступов
-        self.flag_canvas.pack(pady=20, padx=10)
+        top_hw_layout.addWidget(reg_group)
 
+        flags_group = QGroupBox("Flags")
+        flags_layout = QHBoxLayout(flags_group)
         self.flag_leds = {}
-        for i, flag in enumerate(["R", "M", "C", "Z"]):
-            x = 20 + i * 35
-            self.flag_canvas.create_text(x, 10, text=flag)
-            led = self.flag_canvas.create_oval(x-5, 18, x+5, 28, fill="gray")
+        for flag in ["R", "M", "C", "Z"]:
+            flag_vbox = QVBoxLayout()
+            lbl_name = QLabel(flag)
+            lbl_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            led = QLabel()
+            led.setFixedSize(16, 16)
+            led.setStyleSheet("background-color: gray; border-radius: 8px;")
+            flag_vbox.addWidget(lbl_name)
+            flag_vbox.addWidget(led, alignment=Qt.AlignmentFlag.AlignCenter)
+            flags_layout.addLayout(flag_vbox)
             self.flag_leds[flag] = led
 
-        # --- Группа 2: Периферия (Дисплеи, Клавиатура, Аудио) ---
-        mid_hw_frame = ttk.Frame(right_panel)
-        mid_hw_frame.pack(fill=tk.X, pady=5)
+        top_hw_layout.addWidget(flags_group)
+        right_layout.addLayout(top_hw_layout)
 
-        mmio_frame = ttk.LabelFrame(mid_hw_frame, text="MMIO Displays (F3-F0)")
-        mmio_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
+        # --- Группа 2: Периферия (Дисплеи, Клавиатура, Аудио) ---
+        mid_hw_layout = QHBoxLayout()
         
+        mmio_group = QGroupBox("MMIO Displays (F3-F0)")
+        mmio_layout = QHBoxLayout(mmio_group)
         self.mmio_labels = []
         for i in range(4):
-            disp_subframe = ttk.Frame(mmio_frame)
-            disp_subframe.pack(side=tk.LEFT, padx=8, pady=5)
-            lbl = ttk.Label(disp_subframe, text="0", font=("Courier New", 18, "bold"), foreground="red", background="black", width=2, anchor=tk.CENTER)
-            lbl.pack()
-            ttk.Label(disp_subframe, text=f"F{3-i}").pack()
-            self.mmio_labels.append(lbl)
+            disp_vbox = QVBoxLayout()
+            lbl_val = QLabel("0")
+            lbl_val.setFont(mono_font)
+            lbl_val.setStyleSheet("color: red; background-color: black; font-size: 18pt; font-weight: bold; padding: 5px;")
+            lbl_val.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl_name = QLabel(f"F{3-i}")
+            lbl_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        io_frame = ttk.Frame(mid_hw_frame)
-        io_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            disp_vbox.addWidget(lbl_val)
+            disp_vbox.addWidget(lbl_name)
+            mmio_layout.addLayout(disp_vbox)
+            self.mmio_labels.append(lbl_val)
 
-        audio_frame = ttk.LabelFrame(io_frame, text="Audio (F6)")
-        audio_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
-        self.audio_canvas = tk.Canvas(audio_frame, height=50, width=50)
-        self.audio_canvas.pack(padx=10, pady=20)
-        self.audio_led = self.audio_canvas.create_oval(15, 15, 35, 35, fill="gray")
+        mid_hw_layout.addWidget(mmio_group)
 
-        keypad_frame = ttk.LabelFrame(io_frame, text="Keypad (F4-F5)")
-        keypad_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        audio_group = QGroupBox("Audio (F6)")
+        audio_layout = QVBoxLayout(audio_group)
+        self.audio_led = QLabel()
+        self.audio_led.setFixedSize(30, 30)
+        self.audio_led.setStyleSheet("background-color: gray; border-radius: 15px;")
+        audio_layout.addWidget(self.audio_led, alignment=Qt.AlignmentFlag.AlignCenter)
+        mid_hw_layout.addWidget(audio_group)
 
+        keypad_group = QGroupBox("Keypad (F4-F5)")
+        keypad_layout = QGridLayout(keypad_group)
         self.keys = {}
+
+        # Подменяем методы в соответствии с требованиями, чтобы не трогать mmu.py, но интерфейс был нужным
+        if hasattr(self.cpu.mmu, 'hardware_inject_key') and not hasattr(self.cpu.mmu, 'hardware_inject_key_press'):
+            self.cpu.mmu.hardware_inject_key_press = self.cpu.mmu.hardware_inject_key
+        if hasattr(self.cpu.mmu, 'hardware_release_key') and not hasattr(self.cpu.mmu, 'hardware_inject_key_release'):
+            self.cpu.mmu.hardware_inject_key_release = self.cpu.mmu.hardware_release_key
+
         for r in range(4):
             for c in range(4):
                 val = r * 4 + c
-                btn = ttk.Button(keypad_frame, text=f"{val:X}", width=4)
-                btn.grid(row=r, column=c, padx=2, pady=2)
-                
-                # Биндинг низкоуровневых событий X11/Windows для обработки зажатия клавиши (Имитация регистра-защелки)
-                btn.bind("<ButtonPress-1>", lambda e, v=val: self.on_keypad_press(v))
-                btn.bind("<ButtonRelease-1>", lambda e, v=val: self.on_keypad_release(v))
+                btn = QPushButton(f"{val:X}")
+                btn.setFixedSize(40, 30)
+                # Матричная клавиатура (F4-F5): сигналы pressed и released -> hardware_inject_key_press/release
+                btn.pressed.connect(lambda v=val: self.cpu.mmu.hardware_inject_key_press(v))
+                btn.released.connect(lambda: self.cpu.mmu.hardware_inject_key_release())
+                keypad_layout.addWidget(btn, r, c)
                 self.keys[val] = btn
 
+        mid_hw_layout.addWidget(keypad_group)
+        right_layout.addLayout(mid_hw_layout)
+
         # --- Блок Памяти ---
-        mem_frame = ttk.LabelFrame(right_panel, text="Memory Viewer")
-        mem_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        mem_group = QGroupBox("Memory Viewer")
+        mem_layout = QVBoxLayout(mem_group)
 
-        self.disasm_label = ttk.Label(mem_frame, text="00: NOP", font=("Courier New", 10, "bold"), foreground="blue")
-        self.disasm_label.pack(side=tk.TOP, anchor=tk.E, padx=5)
+        self.disasm_label = QLabel("00: NOP")
+        self.disasm_label.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        self.disasm_label.setStyleSheet("color: blue; font-weight: bold;")
+        self.disasm_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        mem_layout.addWidget(self.disasm_label)
 
-        self.notebook = ttk.Notebook(mem_frame)
-        self.notebook.pack(fill=tk.BOTH, expand=True)
+        self.notebook = QTabWidget()
 
-        self.rom_tree = self.create_mem_tree(self.notebook, "ROM")
-        self.ram_tree = self.create_mem_tree(self.notebook, "RAM")
+        self.rom_tree = self.create_mem_tree()
+        self.ram_tree = self.create_mem_tree()
 
-        self.notebook.add(self.rom_tree, text="ROM (System)")
-        self.notebook.add(self.ram_tree, text="RAM (User)")
+        self.notebook.addTab(self.rom_tree, "ROM (System)")
+        self.notebook.addTab(self.ram_tree, "RAM (User)")
 
-    def on_keypad_press(self, val):
-        self.cpu.mmu.kbd_code = val & 0x0F
-        self.cpu.mmu.kbd_stat |= 0x01
-        if not self.is_running:
-            self.update_ui()
+        mem_layout.addWidget(self.notebook)
+        right_layout.addWidget(mem_group)
 
-    def on_keypad_release(self, val):
-        self.cpu.mmu.kbd_stat &= ~0x01
-        if not self.is_running:
-            self.update_ui()
+        main_layout.addWidget(right_panel)
 
-    def create_mem_tree(self, parent, name):
-        columns = [f"{i:X}" for i in range(16)]
-        tree = ttk.Treeview(parent, columns=columns, show="tree headings", height=16)
+    def create_mem_tree(self):
+        tree = QTableWidget(16, 16)
+        tree.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        tree.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
 
-        tree.heading("#0", text="Addr")
-        tree.column("#0", width=45, anchor=tk.CENTER)
+        headers = [f"{i:X}" for i in range(16)]
+        tree.setHorizontalHeaderLabels(headers)
 
-        for col in columns:
-            tree.heading(col, text=col)
-            tree.column(col, width=30, anchor=tk.CENTER)
+        row_headers = [f"{i:X}0" for i in range(16)]
+        tree.setVerticalHeaderLabels(row_headers)
 
         for r in range(16):
-            row_id = f"{r:X}0"
-            tree.insert("", "end", iid=row_id, text=row_id, values=(["0"]*16))
+            for c in range(16):
+                item = QTableWidgetItem("0")
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                tree.setItem(r, c, item)
+
+        # Настраиваем размеры ячеек
+        header = tree.horizontalHeader()
+        for i in range(16):
+            header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
+        vheader = tree.verticalHeader()
+        for i in range(16):
+            vheader.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
 
         return tree
 
@@ -230,19 +287,19 @@ class GUI:
 
     def update_ui(self):
         regs = self.cpu.regs
-        self.reg_labels["A"].config(text=f"{regs.a:X}")
-        self.reg_labels["B"].config(text=f"{regs.b:X}")
-        self.reg_labels["X"].config(text=f"{regs.x:X}")
-        self.reg_labels["Y"].config(text=f"{regs.y:X}")
-        self.reg_labels["SP"].config(text=f"{regs.sp:X}")
-        self.reg_labels["FL"].config(text=f"{regs.fl:X}")
-        self.reg_labels["PCH"].config(text=f"{regs.pch:X}")
-        self.reg_labels["PCL"].config(text=f"{regs.pcl:X}")
-        self.reg_labels["PC"].config(text=f"{regs.pc:02X}")
+        self.reg_labels["A"].setText(f"{regs.a:X}")
+        self.reg_labels["B"].setText(f"{regs.b:X}")
+        self.reg_labels["X"].setText(f"{regs.x:X}")
+        self.reg_labels["Y"].setText(f"{regs.y:X}")
+        self.reg_labels["SP"].setText(f"{regs.sp:X}")
+        self.reg_labels["FL"].setText(f"{regs.fl:X}")
+        self.reg_labels["PCH"].setText(f"{regs.pch:X}")
+        self.reg_labels["PCL"].setText(f"{regs.pcl:X}")
+        self.reg_labels["PC"].setText(f"{regs.pc:02X}")
 
         def update_led(flag, state):
             color = "red" if state else "gray"
-            self.flag_canvas.itemconfig(self.flag_leds[flag], fill=color)
+            self.flag_leds[flag].setStyleSheet(f"background-color: {color}; border-radius: 8px;")
 
         update_led("R", regs.get_flag_r())
         update_led("M", regs.get_flag_m())
@@ -250,105 +307,95 @@ class GUI:
         update_led("Z", regs.get_flag_z())
 
         for i in range(4):
-            self.mmio_labels[i].config(text=f"{self.cpu.mmu.displays[3-i]:X}")
+            self.mmio_labels[i].setText(f"{self.cpu.mmu.displays[3-i]:X}")
 
         audio_color = "red" if self.cpu.mmu.audio else "gray"
-        self.audio_canvas.itemconfig(self.audio_led, fill=audio_color)
+        self.audio_led.setStyleSheet(f"background-color: {audio_color}; border-radius: 15px;")
 
         pc = regs.pc
         m_flag = regs.get_flag_m()
 
-        # Передаем идентификатор банка (1 - ROM, 0 - RAM) вместо самого массива
         self.update_mem_tree(self.rom_tree, 1, pc if m_flag == 1 else -1)
         self.update_mem_tree(self.ram_tree, 0, pc if m_flag == 0 else -1)
 
         if m_flag == 1:
-            self.notebook.select(self.rom_tree)
+            self.notebook.setCurrentIndex(0)
         else:
-            self.notebook.select(self.ram_tree)
+            self.notebook.setCurrentIndex(1)
 
         disasm_text = self.disassemble_current_instruction()
-        self.disasm_label.config(text=f"[{pc:02X}] {disasm_text}")
+        self.disasm_label.setText(f"[{pc:02X}] {disasm_text}")
 
     def update_mem_tree(self, tree, bank_flag, highlight_pc):
         for r in range(16):
-            row_id = f"{r:X}0"
-            values = []
             for c in range(16):
                 idx = r * 16 + c
-                
-                # Аппаратное чтение через MMU. 
-                # Гарантирует корректный поллинг MMIO-устройств в диапазоне F0-FF.
                 val = self.cpu.mmu.read(idx, bank_flag)
                 val_str = f"{val:X}"
                 
                 if idx == highlight_pc:
                     val_str = f"[{val_str}]"
-                values.append(val_str)
-            tree.item(row_id, values=values)
+
+                item = tree.item(r, c)
+                if item:
+                    item.setText(val_str)
 
     def load_code(self):
-        filepath = filedialog.askopenfilename(defaultextension=".asm", filetypes=[("Assembly", "*.asm"), ("All Files", "*.*")])
+        filepath, _ = QFileDialog.getOpenFileName(self, "Open Assembly", "", "Assembly (*.asm);;All Files (*.*)")
         if filepath:
             with open(filepath, "r") as f:
-                self.editor.delete(1.0, tk.END)
-                self.editor.insert(tk.END, f.read())
+                self.editor.setPlainText(f.read())
 
     def save_code(self):
-        filepath = filedialog.asksaveasfilename(defaultextension=".asm", filetypes=[("Assembly", "*.asm"), ("All Files", "*.*")])
+        filepath, _ = QFileDialog.getSaveFileName(self, "Save Assembly", "", "Assembly (*.asm);;All Files (*.*)")
         if filepath:
             with open(filepath, "w") as f:
-                f.write(self.editor.get(1.0, tk.END))
+                f.write(self.editor.toPlainText())
 
     def assemble_to_rom(self):
-        code = self.editor.get(1.0, tk.END)
+        code = self.editor.toPlainText()
         try:
             prog = self.assembler.assemble(code)
             self.cpu.mmu.load_rom(prog)
             self.update_ui()
-            messagebox.showinfo("Success", f"Assembled {len(prog)} nibbles to ROM.")
+            QMessageBox.information(self, "Success", f"Assembled {len(prog)} nibbles to ROM.")
         except AssemblerError as e:
-            messagebox.showerror("Assembler Error", str(e))
+            QMessageBox.critical(self, "Assembler Error", str(e))
 
     def assemble_to_ram(self):
-        code = self.editor.get(1.0, tk.END)
+        code = self.editor.toPlainText()
         try:
             prog = self.assembler.assemble(code)
             self.cpu.mmu.load_ram(prog)
             self.update_ui()
-            messagebox.showinfo("Success", f"Assembled {len(prog)} nibbles to RAM.")
+            QMessageBox.information(self, "Success", f"Assembled {len(prog)} nibbles to RAM.")
         except AssemblerError as e:
-            messagebox.showerror("Assembler Error", str(e))
+            QMessageBox.critical(self, "Assembler Error", str(e))
 
     def step(self):
         if not self.cpu.halted:
             self.cpu.step()
             self.update_ui()
         else:
-            messagebox.showinfo("Halted", "CPU is halted. Reset to continue.")
+            QMessageBox.information(self, "Halted", "CPU is halted. Reset to continue.")
 
     def run(self):
         if not self.is_running:
             self.is_running = True
-            self.run_loop()
+            delay = self.delay_spin.value()
+            self.timer.start(delay)
 
     def run_loop(self):
         if self.is_running and not self.cpu.halted:
             self.cpu.step()
             self.update_ui()
-            try:
-                delay = int(self.delay_var.get())
-            except ValueError:
-                delay = 50
-            self.run_job = self.root.after(delay, self.run_loop)
         else:
             self.is_running = False
+            self.timer.stop()
 
     def pause(self):
         self.is_running = False
-        if self.run_job:
-            self.root.after_cancel(self.run_job)
-            self.run_job = None
+        self.timer.stop()
         self.update_ui()
 
     def reset(self):

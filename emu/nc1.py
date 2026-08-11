@@ -1,10 +1,13 @@
-import tkinter as tk
+import sys
+from PyQt6.QtWidgets import QApplication
 from .mmu import MMU
 from .registers import RegisterFile
 from .cpu import CPU
 from .gui import GUI
 
 def main():
+    app = QApplication(sys.argv)
+
     mmu = MMU()
     regs = RegisterFile()
     cpu = CPU(mmu, regs)
@@ -12,10 +15,11 @@ def main():
     # Do initial reset
     cpu.reset()
 
-    root = tk.Tk()
-    app = GUI(root, cpu)
+    # Create and show the GUI
+    window = GUI(cpu)
+    window.show()
 
-    root.mainloop()
+    sys.exit(app.exec())
 
 if __name__ == "__main__":
     main()
