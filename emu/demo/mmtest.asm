@@ -1,5 +1,6 @@
 JMP 0x10
 
+ORG 0x10
 START:
 LDI 0xF
 MOV X, A
