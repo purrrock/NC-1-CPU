@@ -36,34 +36,17 @@ class CPU:
         return val
 
     def push(self, val: int):
-        """Pushes a nibble to the hardware stack."""
-        sp = self.regs.sp
-        addr = 0xD0 + sp  # Stack grows upward in local 0-F space? Wait.
-        # Docs say: "Stack (grows downward from EF) and data buffers"
-        # So SP is 0..15. We start at EF (SP=15) and grow down.
-        # "Decremented by PUSH and CAL"
-
-        # Let's map SP 0..15 to D0..EF. Actually, simpler:
-        # If it grows downward from EF:
-        # Base is E0. Addr = E0 | SP. Wait, if it's E0-EF, that's 16 nibbles.
-        # Let's check docs again: "D0–EF Stack / Data" -> 32 nibbles.
-        # Wait, SP is 4 bits, so it can only index 16 locations.
-        # If it grows downward, it usually means we use it as an offset.
-        # Let's just map it to E0..EF (SP=F to 0) to keep it simple and 4-bit.
-        # Actually, if SP is decremented BEFORE push or AFTER?
-        # Standard: decrement then write.
-
-        # Let's just use: Addr = 0xE0 + self.regs.sp
-        self.regs.sp = (self.regs.sp - 1) & 0x0F
-        addr = 0xE0 + self.regs.sp
+        """Pushes a nibble to the hardware stack (Page-Locked 0xE0-0xEF)."""
+        addr = 0xE0 | self.regs.sp
         self.mmu.write(addr, val)
+        self.regs.sp = (self.regs.sp - 1) & 0x0F
 
     def pop(self) -> int:
         """Pops a nibble from the hardware stack."""
-        addr = 0xE0 + self.regs.sp
-        val = self.mmu.read(addr, self.regs.get_flag_m())
         self.regs.sp = (self.regs.sp + 1) & 0x0F
-        return val
+        addr = 0xE0 | self.regs.sp
+        # Жесткое чтение из RAM (bank_flag = 0), так как стек физически находится в RAM
+        return self.mmu.read(addr, 0)
 
     def step(self):
         """Executes a single instruction."""

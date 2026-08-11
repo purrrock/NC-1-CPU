@@ -130,6 +130,6 @@ class RegisterFile:
     def reset(self):
         """Hardware reset initialization."""
         self.pc = 0x00
-        self.sp = 0x00
+        self.sp = 0x0F
         # FL: R=1, M=1, C=0, Z=0 -> 1100b = 0xC
         self.fl = 0xC
