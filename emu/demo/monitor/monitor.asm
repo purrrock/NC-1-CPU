@@ -1,189 +1,157 @@
 ORG 0x00
-INIT:
-    LDI 0
-    MOV B, A        ; Очищаем буфер последней клавиши для корректной отрисовки UI
+ENTRY:
+    ; Единая точка входа после RESET и SWI
+CMD_LOOP:
+    ; A/B получают код команды
+    CAL GETKEY
+    LDI 0xA
+    SUB B
+    JZ LOAD
+    LDI 0xB
+    SUB B
+    JZ RUN
+    JMP CMD_LOOP
+LOAD:
+    ; Первый ниббл стартового адреса -> DISP_3
+    CAL GETKEY
     LDI 0xF
-    MOV X, A        ; Выставляем старший полубайт для шины MMIO (0xF0-0xFF)
-    LDI 0xE
-    MOV Y, A        ; Указываем на младший регистр теневого счетчика SPC_L (0xFE)
-    LDI 0
-    STR             ; Инициализируем младший полубайт адреса RAM нулем
-    INC Y           ; Смещаем указатель Y с 0xE на 0xF (Регистр SPC_H)
-    STR             ; Инициализируем старший полубайт адреса RAM нулем
-MAIN_LOOP:
-    LDI 0xF
-    MOV X, A
-    LDI 0x4
-    MOV Y, A        ; Настраиваем шину на порт KBD_STAT (0xF4)
-.wait_press:
-    LDR             ; Аппаратное чтение 0 бита (статус удержания)
-    ADD A           ; Удвоение аккумулятора: если A=0, сработает флаг нуля (Z=1)
-    JZ .wait_press  ; Холостой цикл до замыкания контакта клавиатуры
-    INC Y           ; Быстро переключаем адрес с 0xF4 на 0xF5 (KBD_CODE)
-    LDR             ; Читаем аппаратный скан-код нажатой клавиши
-    MOV B, A        ; Сохраняем код клавиши в регистр общего назначения B
-    DEC Y           ; Возвращаем адрес обратно на 0xF4 (KBD_STAT)
-.wait_rel:
-    LDR             ; Читаем статус клавиатуры для антидребезга
-    DEC A           ; Если статус равен 1 (нажата), 1-1=0 и установится флаг Z=1
-    JZ .wait_rel    ; Блокируем исполнение до физического отпускания клавиши
-    MOV A, SP       ; Читаем текущее состояние автомата из аппаратного стека
-    INC A           ; Если SP=0xF (режим записи), 15+1 вызовет переполнение (Z=1)
-    JZ HNDL_WRITE   ; Ветвление в обработчик ввода данных
-    DEC A           ; Возвращаем A к исходному значению SP
-    JZ HNDL_PREFIX  ; Если SP=0, ожидается вторая клавиша команды (Префикс)
-    DEC A
-    JZ HNDL_ADDR_H  ; Если SP=1, ожидается ввод старшего полубайта адреса
-    DEC A
-    JZ HNDL_ADDR_L  ; Если SP=2, ожидается ввод младшего полубайта адреса
-    JMP HNDL_READ   ; Если SP=3, активен режим просмотра памяти без записи
-HNDL_WRITE:
-    MOV A, B        ; Извлекаем код введенной клавиши
-    INC A           ; Математическая проверка на 0xF (переполнение в 0)
-    JZ .goto_prefix ; Если введена F, расцениваем как ESC и уходим в префикс
-    JMP WRITE_RAM   ; Если введено 0-E, осуществляем теневую запись в RAM
-.goto_prefix:
-    LDI 0
-    MOV SP, A       ; Переключаем автомат ОС в режим префикса (SP=0)
-    JMP UPDATE_UI
-HNDL_PREFIX:
-    MOV A, B
-    DEC A
-    JZ .cmd_addr    ; Комбинация 'F' -> '1': Активация ввода адреса
-    DEC A
-    JZ .cmd_read    ; Комбинация 'F' -> '2': Активация режима чтения
-    DEC A
-    JZ .cmd_run     ; Комбинация 'F' -> '3': Макрос запуска пользовательского кода
-    MOV A, B
-    ADD A           ; Если ввели 0 (0+0=0, Z=1)
-    JZ .cmd_esc_f   ; Комбинация 'F' -> '0': Экранированный ввод значения 0xF
-    LDI 0xF
-    MOV SP, A       ; При любой другой ошибке сбрасываем автомат в режим записи
-    JMP UPDATE_UI
-.cmd_addr:
-    LDI 1
-    MOV SP, A       ; Переводим автомат в ожидание ввода ADDR_H (SP=1)
-    JMP UPDATE_UI
-.cmd_read:
-    LDI 3
-    MOV SP, A       ; Переводим автомат в режим чтения (SP=3)
-    JMP UPDATE_UI
-.cmd_run:
-    SYS 5           ; Аппаратный вызов RETU: Переключение M=0 и JMP на SPC
-.cmd_esc_f:
-    LDI 0xF
-    MOV B, A        ; Подменяем введенный '0' на 'F' для записи в память
-    MOV SP, A       ; Сбрасываем режим префикса обратно в WRITE_MODE (0xF)
-    JMP WRITE_RAM
-HNDL_ADDR_H:
-    LDI 0xF
-    MOV X, A
-    MOV Y, A        ; Настраиваем шину на SPC_H (0xFF)
-    MOV A, B
-    STR             ; Сохраняем введенную цифру как старший полубайт адреса
-    LDI 2
-    MOV SP, A       ; Переводим автомат в ожидание ввода ADDR_L (SP=2)
-    JMP UPDATE_UI
-HNDL_ADDR_L:
-    LDI 0xF
-    MOV X, A
-    LDI 0xE
-    MOV Y, A        ; Настраиваем шину на SPC_L (0xFE)
-    MOV A, B
-    STR             ; Сохраняем введенную цифру как младший полубайт адреса
-    LDI 0xF
-    MOV SP, A       ; Адрес задан, возвращаем автомат в режим записи
-    JMP UPDATE_UI
-HNDL_READ:
-    MOV A, B
-    INC A           ; Проверка на 'F' через переполнение
-    JZ .exit_read
-    JMP INC_ADDR    ; Любая клавиша кроме 'F' просто листает адрес вперед
-.exit_read:
-    LDI 0xF
-    MOV SP, A       ; Завершаем чтение, возвращаемся в режим записи
-    JMP UPDATE_UI
-WRITE_RAM:
-    LDI 0xF
-    MOV X, A
-    LDI 0xE
-    MOV Y, A        ; Обращаемся к регистру системного указателя SPC_L
-    LDR
-    MOV X, A        ; Временно кэшируем младший полубайт целевого адреса в X
-    INC Y           ; Смещаем шину MMIO на SPC_H (0xFF)
-    LDR             ; Читаем старший полубайт целевого адреса
-    MOV Y, X        ; Загружаем в Y младший полубайт
-    MOV X, A        ; Загружаем в X старший полубайт. X:Y теперь смотрят на RAM
-    MOV A, B
-    STR             ; Теневая запись. Аппаратный роутинг направит STR в RAM (M=0)
-INC_ADDR:
-    LDI 0xF
-    MOV X, A
-    LDI 0xE
-    MOV Y, A        ; Устанавливаем шину на SPC_L
-    LDR
-    INC A           ; Инкрементируем младшую часть адреса
-    STR             ; Сохраняем обратно в регистр ОС
-    JZ .inc_high    ; Если произошел переход страницы (0xF -> 0x0), обновляем SPC_H
-    JMP UPDATE_UI
-.inc_high:
-    INC Y           ; Быстрый переход к SPC_H
-    LDR
-    INC A           ; Инкрементируем старшую часть адреса
+    MOV X,A
+    LDI 0x3
+    MOV Y,A
     STR
-UPDATE_UI:
+    ; Второй ниббл стартового адреса -> DISP_2
+    CAL GETKEY
     LDI 0xF
-    MOV X, A
-    LDI 0
-    MOV Y, A        ; Порт индикатора DISP_0
-    MOV A, B
-    STR             ; Отрисовка кода клавиши
-    LDI 0xE
-    MOV Y, A        ; Регистр SPC_L
-    LDR
-    MOV B, A        ; Кэшируем PtrL
-    LDI 2
-    MOV Y, A        ; Порт индикатора DISP_2
-    MOV A, B
-    STR             ; Отрисовка младшего полубайта адреса
+    MOV X,A
+    LDI 0x2
+    MOV Y,A
+    MOV A,B
+    STR
+LOAD_LOOP:
+    ; Получить очередной машинный ниббл
+    CAL GETKEY
+    ; F -> escape/терминатор
     LDI 0xF
-    MOV Y, A        ; Регистр SPC_H (X уже равен 0xF)
-    LDR
-    MOV B, A        ; Кэшируем PtrH. Это важно для последующего кросс-чтения!
-    LDI 3
-    MOV Y, A        ; Порт индикатора DISP_3
-    MOV A, B
-    STR             ; Отрисовка старшего полубайта адреса
-    MOV A, SP
-    INC A           ; Проверка: находимся ли мы в режиме записи (SP=0xF)
-    JZ .show_ram
-    DEC A           ; Восстанавливаем A (A=SP)
-    DEC A
-    DEC A
-    DEC A           ; Вычитаем 3. Если мы в режиме чтения (SP=3), то Z=1
-    JZ .show_ram
+    SUB B
+    JZ ESCAPE
+    ; Обычный ниббл
+    CAL SET_PTR
+    MOV A,B
+    STR
+    CAL ADVANCE
+    JMP LOAD_LOOP
+ESCAPE:
+    ; F0 = конец загрузки
+    CAL GETKEY
+    LDI 0x0
+    SUB B
+    JZ CMD_LOOP
+    ; FF + N = записать литеральный F, N будет обработан
+    ; следующей итерацией
     LDI 0xF
-    MOV X, A
-    LDI 1
-    MOV Y, A        ; Порт индикатора DISP_1
-    MOV A, SP
-    STR             ; Отрисовка служебного номера состояния (для префиксов)
-    JMP MAIN_LOOP
-.show_ram:
+    MOV B,A
+    CAL SET_PTR
+    MOV A,B
+    STR
+    CAL ADVANCE
+    JMP LOAD_LOOP
+RUN:
+    ; Первый ниббл адреса -> PCH
+    CAL GETKEY
+    MOV PCH,A
+    ; Второй ниббл адреса
+    CAL GETKEY
+    MOV A,B
+    ; User Mode: M=0
+    LDI 0x0
+    MOV FL,A
+    ; Запись PCL запускает пользовательский код
+    MOV PCL,A
+SET_PTR:
+    ; D3:D2 хранят текущий адрес записи
+    ; D0:D1 временно используются внутри подпрограммы
     LDI 0xF
-    MOV X, A
-    LDI 0xE
-    MOV Y, A        ; Устанавливаем чтение SPC_L
-    LDR
-    MOV Y, A        ; Y получает значение PtrL
-    MOV A, B        ; Забираем закэшированный ранее PtrH из B, экономя LDR
-    MOV X, A        ; X получает значение PtrH
-    LDRA            ; Аппаратное кросс-чтение из RAM (M ⊕ 1) по адресу X:Y
-    MOV B, A
+    MOV X,A
+    LDI 0x3
+    MOV Y,A
+    LDRA
+    DEC Y
+    DEC Y
+    DEC Y
+    STR
+    LDI 0x2
+    MOV Y,A
+    LDRA
+    DEC Y
+    STR
+    LDI 0x0
+    MOV Y,A
+    LDRA
+    MOV X,A
+    LDI 0x1
+    MOV Y,A
+    LDRA
+    MOV Y,A
+    RET
+ADVANCE:
+    ; B содержит последний введённый ниббл
+    INC Y
+    JC ADV_HIGH
+    ; Следующий адрес в той же странице
+    MOV A,Y
     LDI 0xF
-    MOV X, A
-    LDI 1
-    MOV Y, A        ; Порт индикатора DISP_1
-    MOV A, B
-    STR             ; Отрисовка фактического содержимого ячейки RAM
-    JMP MAIN_LOOP
+    MOV X,A
+    LDI 0x2
+    MOV Y,A
+    STR
+    ; Восстановить отображение последнего ниббла
+    MOV A,B
+    LDI 0x1
+    MOV Y,A
+    STR
+    RET
+ADV_HIGH:
+    ; Переход FF -> 00
+    INC X
+    MOV A,X
+    MOV B,A
+    ; Обновить старшую часть адреса
+    LDI 0xF
+    MOV X,A
+    LDI 0x3
+    MOV Y,A
+    STR
+    ; Обновить младшую часть адреса
+    LDI 0x2
+    MOV Y,A
+    LDI 0x0
+    STR
+    ; Восстановить отображение последнего ниббла
+    LDI 0x1
+    MOV Y,A
+    MOV A,B
+    STR
+    RET
+GETKEY:
+    ; Ожидание нажатия клавиши
+    LDI 0xF
+    MOV X,A
+    LDI 0x4
+    MOV Y,A
+    LDI 0x1
+    MOV B,A
+KEY_WAIT:
+    LDRA
+    AND B
+    JZ KEY_WAIT
+    ; Чтение кода клавиши
+    LDI 0x5
+    MOV Y,A
+    LDRA
+    MOV B,A
+    ; Показать введённый ниббл на DISP_1
+    LDI 0x1
+    MOV Y,A
+    MOV A,B
+    STR
+    RET

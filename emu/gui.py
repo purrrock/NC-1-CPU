@@ -23,6 +23,8 @@ class GUI(QWidget):
 
         self.setup_ui()
         self.update_ui()
+        
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def setup_ui(self):
         main_layout = QHBoxLayout(self)
@@ -31,7 +33,7 @@ class GUI(QWidget):
                 border: 2px outset gray;
                 background-color: lightgray;
                 border-radius: 4px;
-                padding: 5px;
+                padding: 4px;
             }
             QPushButton:pressed {
                 border: 2px inset gray;
@@ -47,7 +49,7 @@ class GUI(QWidget):
                 border-top-left-radius: 4px;
                 border-top-right-radius: 4px;
                 color: black;
-                padding: 4px 8px;
+                padding: 3px 8px;
             }
             QTabBar::tab:selected {
                 background: #F0F0F0;
@@ -72,10 +74,10 @@ class GUI(QWidget):
         self.editor = CodeEditor()
         mono_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         self.editor.setFont(mono_font)
-        self.editor.setMinimumSize(400, 400)
+        # Компактный минимальный размер редактора
+        self.editor.setMinimumSize(220, 200) 
         editor_layout.addWidget(self.editor)
 
-        # Восстановленная строка
         editor_ctrl_layout = QGridLayout()
         
         btn_load = QPushButton("Load")
@@ -141,6 +143,36 @@ class GUI(QWidget):
         right_layout.addWidget(self.mem_panel)
 
         main_layout.addWidget(right_panel)
+
+    def keyPressEvent(self, event):
+        if event.isAutoRepeat():
+            return super().keyPressEvent(event)
+        
+        if self.editor.hasFocus():
+            return super().keyPressEvent(event)
+            
+        val = self.hw_panel.key_map.get(event.key())
+        if val is not None:
+            self.cpu.mmu.hardware_inject_key_press(val)
+            self.hw_panel.keys[val].setDown(True)
+            self.update_ui()
+        else:
+            super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        if event.isAutoRepeat():
+            return super().keyReleaseEvent(event)
+            
+        if self.editor.hasFocus():
+            return super().keyReleaseEvent(event)
+            
+        val = self.hw_panel.key_map.get(event.key())
+        if val is not None:
+            self.cpu.mmu.hardware_inject_key_release()
+            self.hw_panel.keys[val].setDown(False)
+            self.update_ui()
+        else:
+            super().keyReleaseEvent(event)
 
     def update_ui(self):
         self.hw_panel.update_ui()
