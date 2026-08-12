@@ -189,7 +189,6 @@ class CPU:
             # SYS Function
             func = self.fetch()
             if func == 0x0:
-                # HLT
                 self.halted = True
             elif func == 0x1:
                 # RET
@@ -200,13 +199,19 @@ class CPU:
                 # SWI
                 self.mmu.spc_l = self.regs.pcl
                 self.mmu.spc_h = self.regs.pch
-                self.regs.set_flag_m(1) # ROM mode
+                self.regs.set_flag_m(1)
                 self.regs.pc = 0x00
             elif func == 0x5:
                 # RETU
                 self.regs.pcl = self.mmu.spc_l
                 self.regs.pch = self.mmu.spc_h
-                self.regs.set_flag_m(0) # RAM mode
+                self.regs.set_flag_m(0)
+            elif func == 0x6:
+                # LDRA (Load Alternate Bank)
+                # Вычисление целевого банка через XOR-логику: Target_Bank = M ^ 1
+                alt_m = self.regs.get_flag_m() ^ 1
+                addr = self.regs.addr
+                self.regs.a = self.mmu.read(addr, alt_m)
 
         # If PCL was directly written by an instruction (like MOV PCL, A),
         # it flushes pipeline/jumps automatically because pc gets updated by property setters,

@@ -21,9 +21,8 @@ class Assembler:
 
         # Аппаратные алиасы для прерываний и системных вызовов
         self.sys_aliases = {
-            "HLT": 0x0, "RET": 0x1, "SWI": 0x4, "RETU": 0x5
+            "HLT": 0x0, "RET": 0x1, "SWI": 0x4, "RETU": 0x5, "LDRA": 0x6
         }
-
     def assemble(self, source_code: str) -> list[int]:
         lines = source_code.split('\n')
         labels = {}
