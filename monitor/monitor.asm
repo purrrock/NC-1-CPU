@@ -1,147 +1,165 @@
 ORG 0x00
 ENTRY:
-    ; Проверка бита 3 (флаг R) в регистре FL
-    LDI 0x8         ; Маска 1000b
+    ; Единая точка входа
+    LDI 0x8         
     MOV B, A
-    MOV A, FL       ; Чтение статуса
-    AND B           ; A = A & 8
-    JZ CMD_LOOP     ; Если Z=1 (R=0) -> это Software Interrupt, идем в цикл
-
-    ; Холодный старт (R=1). Сброс триггера R, сохраняем M=1 (System Mode)
-    LDI 0x4         ; 0100b
-    MOV FL, A
+    MOV A, FL       
+    AND B           
+    JZ CMD_LOOP     ; Возврат из SWI (R=0)
+    
+    LDI 0x4         
+    MOV FL, A       ; Холодный старт (R=1, M=1)
 
 CMD_LOOP:
-    ; Ожидание команды (A или B)
-    CAL GETKEY
+    LDI 0xF
+    MOV X, A
+    LDI 0x0
+    MOV Y, A
+    STR             ; DISP_0 = 0x0
+
+WAIT_CMD:
+    CAL GETKEY      
     LDI 0xA
     SUB B
     JZ LOAD
     LDI 0xB
     SUB B
     JZ RUN
-    JMP CMD_LOOP
+    JMP WAIT_CMD
 
 LOAD:
-    ; Ввод старшего полубайта адреса -> DISP_3
-    CAL GETKEY      ; После возврата X гарантированно равен 0xF
-    LDI 0x3
-    MOV Y, A        ; Указатель на 0xF3
-    MOV A, B        ; Восстановление кода клавиши
-    STR             ; Запись в DISP_3
+    LDI 0x0
+    MOV Y, A
+    LDI 0xA
+    STR             ; DISP_0 = 0xA
     
-    ; Ввод младшего полубайта адреса -> DISP_2
-    CAL GETKEY      ; X снова 0xF
+    CAL GETKEY      ; Возвращает код в A и B. Y остается равным 4 после GETKEY
+    DEC Y           ; Y = 3 (Указатель на DISP_3)
+    STR             ; DISP_3 = PCH
+    
+    CAL GETKEY      
     LDI 0x2
-    MOV Y, A        ; Указатель на 0xF2
-    MOV A, B
-    STR             ; Запись в DISP_2
+    MOV Y, A
+    STR             ; DISP_2 = PCL
 
 LOAD_LOOP:
-    CAL GETKEY
-    ; Проверка на терминатор/escape (код F)
+    CAL SET_PTR     ; X=PCH, Y=PCL, A=RAM[X:Y]
+    MOV B, A        ; B = RAM[X:Y]
+    LDI 0xF
+    MOV X, A
+    LDI 0x1
+    MOV Y, A
+    MOV A, B
+    STR             ; DISP_1 = RAM[X:Y] (Динамическая индикация)
+    
+    CAL GETKEY      
     LDI 0xF
     SUB B
     JZ ESCAPE
 
 WRITE_NIBBLE:
-    ; Общая ветка записи ниббла в память
-    CAL SET_PTR     ; Установка X:Y из дисплеев
-    MOV A, B        ; A = целевой ниббл
+    CAL SET_PTR     
+    MOV A, B        ; Восстановление кода клавиши в A
     STR             ; RAM[X:Y] = A
-    CAL ADVANCE     ; Инкремент адреса в дисплеях
+    CAL ADVANCE
     JMP LOAD_LOOP
 
 ESCAPE:
     CAL GETKEY
     LDI 0x0
     SUB B
-    JZ CMD_LOOP     ; Ввод F -> 0: Возврат в командный цикл
+    JZ CMD_LOOP     ; F0 -> Выход
     
-    ; Ввод F -> F (или любой другой): Запись литерального F
     LDI 0xF
-    MOV B, A        ; Подготовка F для записи
-    JMP WRITE_NIBBLE; Прыжок на общую логику сохранения
+    MOV B, A        ; FF -> Литерал F
+    JMP WRITE_NIBBLE
 
 RUN:
-    CAL GETKEY      ; Ввод PCH
-    MOV PCH, A
-    CAL GETKEY      ; Ввод PCL
     LDI 0x0
-    MOV FL, A       ; Сброс M=0 (переход в User Mode)
-    MOV A, B
-    MOV PCL, A      ; Аппаратный прыжок на PCH:PCL в банке RAM
+    MOV Y, A
+    LDI 0xB
+    STR             ; DISP_0 = 0xB
+    
+    CAL GETKEY
+    MOV PCH, A      ; Прямая загрузка из A
+    
+    CAL GETKEY
+    LDI 0x0
+    MOV FL, A       ; M = 0 (User Mode)
+    MOV A, B        ; Восстановление кода клавиши
+    MOV PCL, A      ; Запуск пользовательского кода
 
 SET_PTR:
-    ; Считывает текущий адрес из MMIO и настраивает X:Y
     LDI 0xF
     MOV X, A
     LDI 0x3
     MOV Y, A
-    LDR             ; Чтение DISP_3
-    MOV B, A        ; Сохранение PCH в B
-    LDI 0x2
-    MOV Y, A
-    LDR             ; Чтение DISP_2 (теперь A = PCL)
-    MOV Y, A        ; Установка младшего индекса
-    MOV A, B
-    MOV X, A        ; Установка старшего индекса
+    LDR
+    MOV PCH, A      ; Использование PCH как регистра-скратчпада
+    DEC Y           ; Y = 2 (DISP_2)
+    LDR
+    MOV Y, A        ; Y = PCL
+    MOV A, PCH
+    MOV X, A        ; X = PCH
+    LDRA            ; Чтение RAM[X:Y]
     RET
 
 ADVANCE:
-    ; Инкремент значения в DISP_2
+    ; Инкремент младшего полубайта адреса (DISP_2)
     LDI 0xF
     MOV X, A
     LDI 0x2
     MOV Y, A
     LDR
     MOV B, A
-    INC B           ; Флаг C установится при переполнении (0xF + 1)
-    MOV A, B
-    STR             ; Обновление DISP_2
-    JC ADV_HIGH     ; Если переполнение -> инкремент DISP_3
+    INC B           ; AЛУ: B = B + 1. Аппаратно сбрасывает C=0 или устанавливает C=1 при 0xF->0x0
+    MOV A, B        ; Переносим результат обратно в A для записи
+    STR             
+    JC ADV_HIGH     ; Чистый переход при переполнении страницы памяти
     RET
 
 ADV_HIGH:
-    ; Инкремент значения в DISP_3 (X уже равен 0xF)
+    ; Инкремент старшего полубайта адреса (DISP_3)
     LDI 0x3
     MOV Y, A
     LDR
     MOV B, A
-    INC B
+    INC B           ; AЛУ: B = B + 1
     MOV A, B
-    STR             ; Обновление DISP_3
+    STR             ; DISP_3 = DISP_3 + 1
     RET
 
 GETKEY:
-    ; Настройка X:Y на порт статуса клавиатуры (0xF4)
+    ; Инициализация указателя на порт GPI (0xF4)
     LDI 0xF
     MOV X, A
     LDI 0x4
     MOV Y, A
     LDI 0x1
-    MOV B, A            ; B = 0x1 (маска для проверки бита 0)
+    MOV B, A        ; Резервируем B как маску (0x1) для АЛУ
     
-KEY_WAIT_PRESS:
-    LDR                 ; Чтение статуса (0xF4)
-    AND B               ; Изоляция нулевого бита
-    JZ KEY_WAIT_PRESS   ; Ожидание перехода бита 0 в единицу (нажатие)
+K_WAIT_P:
+    LDR             ; Чтение состояния порта в аккумулятор A. Флаги НЕ меняются!
+    AND B           ; Пропускаем через АЛУ: A = A & 1. АЛУ обновляет флаг Z!
+    JZ K_WAIT_P     ; Теперь Z отражает реальное состояние пина. Если 0 -> ждем.   
     
-KEY_WAIT_RELEASE:
-    LDR                 ; Повторное чтение статуса (0xF4)
-    AND B
-    SUB B               ; Вычитание маски. Если бит установлен (1 - 1 = 0), флаг Z=1
-    JZ KEY_WAIT_RELEASE ; Ожидание перехода бита 0 в ноль (отпускание)
-    
-    ; Клавиша отпущена. Чтение защелкнутого кода из 0xF5
     LDI 0x5
     MOV Y, A
     LDR
-    MOV B, A            ; Сохранение целевого кода в B
+    MOV PCH, A      ; Сохранение кода клавиши
     
-    ; Вывод считанного кода на индикатор 0xF1
     LDI 0x1
     MOV Y, A
-    MOV A, B
-    STR
+    STR             ; DISP_1 = Введенный ниббл
+    
+    LDI 0x4
+    MOV Y, A
+    
+K_WAIT_R:
+    LDR
+    SUB B           ; Если кнопка нажата, A=1. 1 - 1 = 0 (Z=1)
+    JZ K_WAIT_R     
+    
+    MOV A, PCH      ; Восстановление кода в A
+    MOV B, A        ; Дублирование кода в B для ABI
     RET

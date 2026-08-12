@@ -94,16 +94,35 @@ class MMU:
             self.spc_h = value
 
     def load_rom(self, program: list[int]):
-        """Helper to load a program into ROM."""
+        """Загружает программу в ROM с проверкой переполнения банка."""
+        if len(program) > 240:
+            raise ValueError(f"Program size ({len(program)} nibbles) exceeds available ROM space (max 240 nibbles before MMIO space).")
         for i, val in enumerate(program):
-            if i < 256:
-                self.rom[i] = val & 0x0F
+            self.rom[i] = val & 0x0F
 
     def load_ram(self, program: list[int]):
-        """Helper to load a program into RAM."""
+        """Загружает программу в RAM с проверкой переполнения банка."""
+        if len(program) > 224:
+            raise ValueError(f"Program size ({len(program)} nibbles) exceeds available RAM space (max 224 nibbles before Stack/MMIO space).")
         for i, val in enumerate(program):
-            if i < 256:
-                self.ram[i] = val & 0x0F
+            self.ram[i] = val & 0x0F
+
+    def clear_rom(self):
+        """Очищает банк ROM нулями."""
+        self.rom = [0] * 256
+
+    def clear_ram(self):
+        """Очищает банк RAM нулями."""
+        self.ram = [0] * 256
+
+    def hardware_inject_key_press(self, scancode: int):
+        """Имитация аппаратного прерывания от контроллера клавиатуры (Key Pressed)"""
+        self.kbd_code = scancode & 0x0F
+        self.kbd_stat = 1
+
+    def hardware_inject_key_release(self):
+        """Имитация снятия сигнала удержания клавиши (Key Released)"""
+        self.kbd_stat = 0
 
     def reset(self):
         """Resets MMIO state."""
@@ -113,21 +132,3 @@ class MMU:
         self.audio = 0
         self.spc_l = 0
         self.spc_h = 0
-        # ROM and RAM contents are usually preserved across resets in hardware,
-        # but zeroing RAM might be useful. For now, keep them intact like real memory.
-    def hardware_inject_key_press(self, scancode: int):
-        """Имитация аппаратного прерывания от контроллера клавиатуры (Key Pressed)"""
-        self.kbd_code = scancode & 0x0F
-        self.kbd_stat = 1
-
-    def hardware_inject_key_release(self):
-        """Имитация снятия сигнала удержания клавиши (Key Released)"""
-        self.kbd_stat = 0
-        
-    def clear_rom(self):
-        """Fills ROM bank with zeros."""
-        self.rom = [0] * 256
-
-    def clear_ram(self):
-        """Fills RAM bank with zeros."""
-        self.ram = [0] * 256

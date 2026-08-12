@@ -114,10 +114,9 @@ Unified address space layout across both banks (`00`..`FF`).
 | Address (HEX) | Region | Access Privilege | Description & ABI Usage |
 | :---: | :---: | :---: | :--- |
 | **`00`** | **Entry Vector** | Hardware | Unified entry point for Reset (`R=1`) and SWI (`R=0`). |
-| **`01` - `0F`** | **Zero Page** | Kernel / Reserved | Reserved for OS state preservation (user register saves during `SWI`). |
-| **`10` - `CF`** | **Program Space** | User / Kernel | Primary code execution space (192 nibbles). |
+| **`01` - `0F`** | **Zero Page** | User / Kernel | General-purpose data workspace. |
+| **`10` - `DF`** | **Program Space** | User / Kernel | Primary code execution space (192 nibbles). |
 | **`D0` - `DF`** | **Buffer Space** | User / Kernel | General-purpose data workspace. |
-| **`E0` - `EF`** | **Hardware Stack** | Hardware / Stack | Dedicated 16-nibble Page-Locked Stack space (`0xE0`..`0xEF`). |
 | **`F0` - `FF`** | **MMIO Ports** | Memory-Mapped I/O | Peripheral device control and registers (see Section 5). |
 
 *Hardware vs. ABI Note:* The RAM hardware is uniform. Executing code from `0x00` in User Mode (`M=0`) is physically valid. However, the OS ABI reserves `0x01`..`0x0F` as Zero Page workspace. User programs allocating data in `0x01`..`0x0F` risk state corruption during system calls.
@@ -243,6 +242,9 @@ Peripherals are mapped to addresses `F0`..`FF` in RAM space. Display registers `
 | **`F7`** | **RNG** | R | R3 | R2 | R1 | R0 | Pseudo-random number generator output (`0x0`..`0xF`). |
 | **`FE`** | **SPC_L** | R/W | S3 | S2 | S1 | S0 | Low nibble of Shadow PC (Syscall return address). |
 | **`FF`** | **SPC_H** | R/W | S7 | S6 | S5 | S4 | High nibble of Shadow PC (Syscall return address). |
+
+**Hardware Latching Behavior:**
+The `KBD_CODE` register (`0xF5`) is latched on the rising edge of the keyboard strobe. It persistently retains the 4-bit code of the last pressed key even after the key is physically released and `GPI_KBD` (`0xF4`) Bit 0 transitions back to `0`. Polling algorithms (such as ROM Monitors) can safely read `0xF5` after waiting for the key release edge, eliminating the need for intermediate RAM/Display buffering during the active hold phase.
 
 ---
 

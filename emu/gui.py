@@ -197,7 +197,9 @@ class GUI(QWidget):
             self.cpu.mmu.load_rom(prog)
             self.update_ui()
             QMessageBox.information(self, "Success", f"Assembled {len(prog)} nibbles to ROM.")
-        except AssemblerError as e:
+        except (AssemblerError, ValueError) as e:
+            # Вывод ошибки в системную консоль и в UI
+            print(f"[ASSEMBLER ERROR] {str(e)}")
             QMessageBox.critical(self, "Assembler Error", str(e))
 
     def assemble_to_ram(self):
@@ -207,7 +209,9 @@ class GUI(QWidget):
             self.cpu.mmu.load_ram(prog)
             self.update_ui()
             QMessageBox.information(self, "Success", f"Assembled {len(prog)} nibbles to RAM.")
-        except AssemblerError as e:
+        except (AssemblerError, ValueError) as e:
+            # Вывод ошибки в системную консоль и в UI
+            print(f"[ASSEMBLER ERROR] {str(e)}")
             QMessageBox.critical(self, "Assembler Error", str(e))
 
     def clear_rom(self):
