@@ -1,8 +1,18 @@
 ORG 0x00
 ENTRY:
-    ; Единая точка входа после RESET и SWI
+    ; Проверка бита 3 (флаг R) в регистре FL
+    LDI 0x8         ; Маска 1000b
+    MOV B, A
+    MOV A, FL       ; Чтение статуса
+    AND B           ; A = A & 8
+    JZ CMD_LOOP     ; Если Z=1 (R=0) -> это Software Interrupt, идем в цикл
+
+    ; Холодный старт (R=1). Сброс триггера R, сохраняем M=1 (System Mode)
+    LDI 0x4         ; 0100b
+    MOV FL, A
+
 CMD_LOOP:
-    ; A/B получают код команды
+    ; Ожидание команды (A или B)
     CAL GETKEY
     LDI 0xA
     SUB B
@@ -11,147 +21,120 @@ CMD_LOOP:
     SUB B
     JZ RUN
     JMP CMD_LOOP
+
 LOAD:
-    ; Первый ниббл стартового адреса -> DISP_3
-    CAL GETKEY
-    LDI 0xF
-    MOV X,A
+    ; Ввод старшего полубайта адреса -> DISP_3
+    CAL GETKEY      ; После возврата X гарантированно равен 0xF
     LDI 0x3
-    MOV Y,A
-    STR
-    ; Второй ниббл стартового адреса -> DISP_2
-    CAL GETKEY
-    LDI 0xF
-    MOV X,A
+    MOV Y, A        ; Указатель на 0xF3
+    MOV A, B        ; Восстановление кода клавиши
+    STR             ; Запись в DISP_3
+    
+    ; Ввод младшего полубайта адреса -> DISP_2
+    CAL GETKEY      ; X снова 0xF
     LDI 0x2
-    MOV Y,A
-    MOV A,B
-    STR
+    MOV Y, A        ; Указатель на 0xF2
+    MOV A, B
+    STR             ; Запись в DISP_2
+
 LOAD_LOOP:
-    ; Получить очередной машинный ниббл
     CAL GETKEY
-    ; F -> escape/терминатор
+    ; Проверка на терминатор/escape (код F)
     LDI 0xF
     SUB B
     JZ ESCAPE
-    ; Обычный ниббл
-    CAL SET_PTR
-    MOV A,B
-    STR
-    CAL ADVANCE
+
+WRITE_NIBBLE:
+    ; Общая ветка записи ниббла в память
+    CAL SET_PTR     ; Установка X:Y из дисплеев
+    MOV A, B        ; A = целевой ниббл
+    STR             ; RAM[X:Y] = A
+    CAL ADVANCE     ; Инкремент адреса в дисплеях
     JMP LOAD_LOOP
+
 ESCAPE:
-    ; F0 = конец загрузки
     CAL GETKEY
     LDI 0x0
     SUB B
-    JZ CMD_LOOP
-    ; FF + N = записать литеральный F, N будет обработан
-    ; следующей итерацией
+    JZ CMD_LOOP     ; Ввод F -> 0: Возврат в командный цикл
+    
+    ; Ввод F -> F (или любой другой): Запись литерального F
     LDI 0xF
-    MOV B,A
-    CAL SET_PTR
-    MOV A,B
-    STR
-    CAL ADVANCE
-    JMP LOAD_LOOP
+    MOV B, A        ; Подготовка F для записи
+    JMP WRITE_NIBBLE; Прыжок на общую логику сохранения
+
 RUN:
-    ; Первый ниббл адреса -> PCH
-    CAL GETKEY
-    MOV PCH,A
-    ; Второй ниббл адреса
-    CAL GETKEY
-    MOV A,B
-    ; User Mode: M=0
+    CAL GETKEY      ; Ввод PCH
+    MOV PCH, A
+    CAL GETKEY      ; Ввод PCL
     LDI 0x0
-    MOV FL,A
-    ; Запись PCL запускает пользовательский код
-    MOV PCL,A
+    MOV FL, A       ; Сброс M=0 (переход в User Mode)
+    MOV A, B
+    MOV PCL, A      ; Аппаратный прыжок на PCH:PCL в банке RAM
+
 SET_PTR:
-    ; D3:D2 хранят текущий адрес записи
-    ; D0:D1 временно используются внутри подпрограммы
+    ; Считывает текущий адрес из MMIO и настраивает X:Y
     LDI 0xF
-    MOV X,A
+    MOV X, A
     LDI 0x3
-    MOV Y,A
-    LDRA
-    DEC Y
-    DEC Y
-    DEC Y
-    STR
+    MOV Y, A
+    LDR             ; Чтение DISP_3
+    MOV B, A        ; Сохранение PCH в B
     LDI 0x2
-    MOV Y,A
-    LDRA
-    DEC Y
-    STR
-    LDI 0x0
-    MOV Y,A
-    LDRA
-    MOV X,A
-    LDI 0x1
-    MOV Y,A
-    LDRA
-    MOV Y,A
+    MOV Y, A
+    LDR             ; Чтение DISP_2 (теперь A = PCL)
+    MOV Y, A        ; Установка младшего индекса
+    MOV A, B
+    MOV X, A        ; Установка старшего индекса
     RET
+
 ADVANCE:
-    ; B содержит последний введённый ниббл
-    INC Y
-    JC ADV_HIGH
-    ; Следующий адрес в той же странице
-    MOV A,Y
+    ; Инкремент значения в DISP_2
     LDI 0xF
-    MOV X,A
+    MOV X, A
     LDI 0x2
-    MOV Y,A
-    STR
-    ; Восстановить отображение последнего ниббла
-    MOV A,B
-    LDI 0x1
-    MOV Y,A
-    STR
+    MOV Y, A
+    LDR
+    MOV B, A
+    INC B           ; Флаг C установится при переполнении (0xF + 1)
+    MOV A, B
+    STR             ; Обновление DISP_2
+    JC ADV_HIGH     ; Если переполнение -> инкремент DISP_3
     RET
+
 ADV_HIGH:
-    ; Переход FF -> 00
-    INC X
-    MOV A,X
-    MOV B,A
-    ; Обновить старшую часть адреса
-    LDI 0xF
-    MOV X,A
+    ; Инкремент значения в DISP_3 (X уже равен 0xF)
     LDI 0x3
-    MOV Y,A
-    STR
-    ; Обновить младшую часть адреса
-    LDI 0x2
-    MOV Y,A
-    LDI 0x0
-    STR
-    ; Восстановить отображение последнего ниббла
-    LDI 0x1
-    MOV Y,A
-    MOV A,B
-    STR
+    MOV Y, A
+    LDR
+    MOV B, A
+    INC B
+    MOV A, B
+    STR             ; Обновление DISP_3
     RET
+
 GETKEY:
-    ; Ожидание нажатия клавиши
+    ; Настройка на чтение статуса клавиатуры (0xF4)
     LDI 0xF
-    MOV X,A
+    MOV X, A
     LDI 0x4
-    MOV Y,A
+    MOV Y, A
     LDI 0x1
-    MOV B,A
+    MOV B, A        ; B = маска 0x1
 KEY_WAIT:
-    LDRA
-    AND B
-    JZ KEY_WAIT
-    ; Чтение кода клавиши
+    LDR             ; Чтение порта F4
+    AND B           ; Проверка нулевого бита
+    JZ KEY_WAIT     ; Ждем нажатия
+    
+    ; Чтение кода клавиши из 0xF5
     LDI 0x5
-    MOV Y,A
-    LDRA
-    MOV B,A
-    ; Показать введённый ниббл на DISP_1
+    MOV Y, A
+    LDR
+    MOV B, A        ; Сохранение кода в B
+    
+    ; Отображение кода на DISP_1 (0xF1)
     LDI 0x1
-    MOV Y,A
-    MOV A,B
+    MOV Y, A
+    MOV A, B
     STR
     RET
