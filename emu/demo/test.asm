@@ -60,7 +60,7 @@ TEST_6_CALL:
     MOV B, A     ; Подпрограмма записала 9 в A. B=9
     LDI 9        ; A = 9
     SUB B        ; Сравниваем
-    JZR SUCCESS  ; Успех?
+    JZ SUCCESS  ; Успех?
     JMP ERROR    ; ОШИБКА
 
 ; --- Блоки подпрограмм и останова ---

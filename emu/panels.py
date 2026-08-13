@@ -255,7 +255,7 @@ class MemoryPanel(QWidget):
         # --- Базовые инструкции (0..E) ---
         if opcode == 0x0:
             imm = read(1)
-            return "NOP" if imm == 0 else f"LDI 0x{imm:X}"
+            return f"LDI 0x{imm:X}"
         elif opcode == 0x1:
             return "LDR"
         elif opcode == 0x2:
@@ -320,7 +320,7 @@ class MemoryPanel(QWidget):
                 target_addr = (h << 4) | l
                 return f"{mnemonics[subop]} 0x{target_addr:02X}"
             elif subop in (0xE, 0xF):
-                return "RESERVED"
+                return "NOP"
 
         return f"UNK 0x{opcode:X}"
 

@@ -6,7 +6,7 @@ class AssemblerError(Exception):
 class Assembler:
     """
     Two-pass assembler for NC-1 CPU (ISA v4.4 Variable-Length).
-    Includes ORG directive, bound checks, relative jumps, and syntax synonyms.
+    Includes ORG, DN, DB directives, bound checks, relative jumps, and syntax synonyms.
     """
     def __init__(self):
         self.regs = {
@@ -43,18 +43,31 @@ class Assembler:
             opcode = tokens[0]
             args = tokens[1:]
 
+            # --- Directives ---
             if opcode == "ORG":
                 if len(args) != 1:
                     raise AssemblerError(f"ORG expects 1 argument (line {line_num+1})")
                 pc = self._parse_val(args[0], {})
                 parsed_lines.append((line_num, "ORG", args, 0))
                 continue
+            elif opcode == "DN":
+                if not args:
+                    raise AssemblerError(f"DN expects at least 1 argument (line {line_num+1})")
+                parsed_lines.append((line_num, "DN", args, pc))
+                pc += len(args)
+                continue
+            elif opcode == "DB":
+                if not args:
+                    raise AssemblerError(f"DB expects at least 1 argument (line {line_num+1})")
+                parsed_lines.append((line_num, "DB", args, pc))
+                pc += len(args) * 2
+                continue
 
-            # Определение базовых длин инструкций и стандартизация синонимов
+            # --- Instructions ---
             size = 0
             std_opcode = opcode
 
-            # --- 1-Nibble Instructions ---
+            # 1-Nibble Instructions
             if opcode in ("LDR", "STR", "RET", "INX", "DEX"):
                 size = 1
             elif opcode in ("PHA", "PUSH"):
@@ -75,19 +88,16 @@ class Assembler:
                 else:
                     std_opcode = "MOV_REG"; size = 3 # F0 MOV Reg
 
-            # --- 2-Nibble Instructions ---
+            # 2-Nibble Instructions
             elif opcode in ("LDI", "JZR", "JCR", "JR", "XCHG", "ADD", "SUB", "AND", "XOR", "LDRA", "XBNK", "BOOT"):
                 size = 2
             elif opcode == "NOP":
-                # NOP транслируется в LDI 0
+                # В v4.4 NOP транслируется в зарезервированную команду 0xFE
                 std_opcode = "NOP"; size = 2 
 
-            # --- 3-Nibble Instructions ---
-            elif opcode == "LDP":
-                size = 3
-
-            # --- 4-Nibble Instructions ---
-            elif opcode in ("JZ", "JC", "JMP", "CAL"):
+            # 4-Nibble Instructions
+            # ИСПРАВЛЕНИЕ: LDP — это 4-ниббловая команда (F 8 Hi Lo), а не 3!
+            elif opcode in ("JZ", "JC", "JMP", "CAL", "LDP"):
                 size = 4
             else:
                 raise AssemblerError(f"Unknown instruction '{opcode}' on line {line_num+1}")
@@ -106,11 +116,27 @@ class Assembler:
                 pc = target_pc
                 continue
 
-            # ---------------------------
-            # Base Opcodes (0-E)
-            # ---------------------------
+            # --- Processing Data Directives ---
+            if opcode == "DN":
+                for arg in args:
+                    val = self._parse_val(arg, labels)
+                    if not (0 <= val <= 15): 
+                        raise AssemblerError(f"DN value out of 4-bit range: {val} (line {line_num+1})")
+                    program.append(val)
+                pc += len(args)
+                continue
+            elif opcode == "DB":
+                for arg in args:
+                    val = self._parse_val(arg, labels)
+                    if not (0 <= val <= 255): 
+                        raise AssemblerError(f"DB value out of 8-bit range: {val} (line {line_num+1})")
+                    program.extend([(val >> 4) & 0x0F, val & 0x0F])
+                pc += len(args) * 2
+                continue
+
+            # --- Base Opcodes (0-E) ---
             if opcode == "NOP":
-                program.extend([0x0, 0x0])
+                program.extend([0xF, 0xE])
                 pc += 2
             elif opcode == "LDI":
                 if len(args) != 1: raise AssemblerError(f"LDI expects 1 argument (line {line_num+1})")
@@ -170,9 +196,7 @@ class Assembler:
                 elif opcode == "JR": program.extend([0xE, disp4])
                 pc += 2
 
-            # ---------------------------
-            # Extended Opcodes (Prefix F)
-            # ---------------------------
+            # --- Extended Opcodes (Prefix F) ---
             elif opcode == "MOV_REG":
                 dest, src = args[0], args[1]
                 if dest == "A" and src in self.regs:
@@ -201,8 +225,9 @@ class Assembler:
                 if len(args) != 1: raise AssemblerError(f"LDP expects 1 arg (line {line_num+1})")
                 addr = self._parse_val(args[0], labels)
                 if not (0 <= addr <= 255): raise AssemblerError(f"Address out of 8-bit range (line {line_num+1})")
+                # ИСПРАВЛЕНИЕ: LDP генерирует 4 ниббла, увеличиваем pc на 4
                 program.extend([0xF, 0x8, (addr >> 4) & 0x0F, addr & 0x0F])
-                pc += 3
+                pc += 4
             elif opcode == "BOOT":
                 program.extend([0xF, 0x9])
                 pc += 2

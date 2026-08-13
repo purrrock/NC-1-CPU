@@ -14,7 +14,7 @@ The **NC-1** is a 4-bit microprocessor with an 8-bit addressing space, engineere
 * **Frequency-Optimized Variable-Length ISA:** 1-nibble, 2-nibble, 3-nibble, and 4-nibble instruction encodings optimized based on real-world assembly profiling.
 * **Single-Nibble Core Operations:** High-speed 1-nibble opcodes for memory loads/stores (`LDR`, `STR`), hardware pointer operations (`INX`, `DEX`), stack management (`PHA`, `PLA`), accumulator operations (`INC A`, `DEC A`), register transfers (`MOV A,B`, `MOV B,A`), and subroutine returns (`RET`).
 * **Compact Relative Branching (`JZR`, `JCR`, `JR`):** 2-nibble conditional and unconditional relative jumps using a signed 4-bit displacement (`-8` to `+7` nibble offset).
-* **Extended Instruction Prefix (`EXT` / Opcode `F`):** Dedicated prefix unleashing 2-nibble register arithmetic (`ADD B`, `SUB B`, `AND B`, `XOR B`), 3-nibble pointer loading (`LDP addr8`), 3-nibble general moves (`MOV Reg`), and 4-nibble absolute branching (`JMP`, `CAL`, `JZ`, `JC`).
+* **Extended Instruction Prefix (`EXT` / Opcode `F`):** Dedicated prefix unleashing 2-nibble register arithmetic (`ADD B`, `SUB B`, `AND B`, `XOR B`), 4-nibble pointer loading (`LDP addr8`), 3-nibble general moves (`MOV Reg`), and 4-nibble absolute branching (`JMP`, `CAL`, `JZ`, `JC`).
 * **Orthogonal Register File:** Direct register-mapped access to Accumulator (`A`), Auxiliary (`B`), Index High/Low (`X:Y`), Stack Pointer (`SP`), Status Flags (`FL`), and Program Counter (`PCH:PCL`).
 * **Dual-Bank Harvard Memory Architecture:** 256 nibbles of System ROM and 256 nibbles of User RAM sharing an 8-bit addressing space.
 * **Page-Locked Hardware Stack:** 4-bit physical Stack Pointer (`SP`) mapped to a dedicated 16-nibble RAM page (`0xE0`..`0xEF`) for subroutines and context pushes/pops.
@@ -170,7 +170,7 @@ Instructions beginning with Opcode `F` decode the second nibble as a subopcode.
 | **`F5`** | **`XOR B`** | `F 5` | 2 | **Bitwise XOR Auxiliary:** `A = A ^ B`. Updates Z flag; clears C flag. |
 | **`F6`** | **`LDRA`** | `F 6` | 2 | **Load Alternate Bank:** `A = AlternateBank[X:Y]` where $\text{Target} = M \oplus 1$. Does not alter M, Z, C. |
 | **`F7`** | **`XBNK`** | `F 7` | 2 | **Exchange Execution Bank:** `M = M XOR 1`. Toggles execution bank. Does not alter Z, C, or any register. |
-| **`F8`** | **`LDP`** | `F 8 Hi Lo` | 3 | **Load Memory Pointer:** Immediate 8-bit pointer assignment: `X = Hi`, `Y = Lo`. |
+| **`F8`** | **`LDP`** | `F 8 Hi Lo` | 4 | **Load Memory Pointer:** Immediate 8-bit pointer assignment: `X = Hi`, `Y = Lo`. |
 | **`F9`** | **`BOOT`** | `F 9` | 2 | **Software Reset:** Restores CPU context to Monitor: `PC = 0x00`, `SP = 0xF`, `M = 1`. |
 | **`FA`** | **`JZ`** | `F A Hi Lo` | 4 | **Absolute Jump if Zero:** If `Z == 1`, `PC = Hi:Lo`. |
 | **`FB`** | **`JC`** | `F B Hi Lo` | 4 | **Absolute Jump if Carry:** If `C == 1`, `PC = Hi:Lo`. |

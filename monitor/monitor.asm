@@ -1,23 +1,23 @@
 ORG 0x00
 ENTRY:
-    ; Unified entry after RESET or SWI
-    LDI 0x8
-    MOV B,A
-    MOV A,FL
-    AND B
-    JZ MON_INIT
-    ; Cold start: clear R, keep M=1
-    LDI 0x4
-    MOV FL,A
+    ; Единая точка входа для Reset (M=1, R=1) и BOOT (M=1, PC=0)
+    JMP MON_INIT
+
+ORG 0x0E
+RUN_XBNK:
+    ; Trampoline pattern: переключение банков (ROM -> RAM)
+    ; Следующая выборка инструкции произойдет из RAM[0x10]
+    XBNK
+
+ORG 0x10
 MON_INIT:
-    ; Reset display mode and restore MMIO pointer
-    LDI 0xF
-    MOV X,A
+    ; DISP_0 = 0x0 (Command Mode)
+    LDP 0xF0
     LDI 0x0
-    MOV Y,A
     STR
+
 WAIT_CMD:
-    ; Read command: A / B
+    ; Ожидание команды оператора
     CAL GETKEY
     LDI 0xA
     SUB B
@@ -26,127 +26,139 @@ WAIT_CMD:
     SUB B
     JZ RUN
     JMP WAIT_CMD
+
 LOAD:
-    ; DISP_0 = A, current address = 0x10
-    LDI 0x0
-    MOV Y,A
+    ; DISP_0 = 0xA (LOAD Mode)
+    LDP 0xF0
     LDI 0xA
     STR
-    LDI 0x3
-    MOV Y,A
+    
+    ; Инициализация PCH:PCL адресом 0x10
+    LDP 0xF3
     LDI 0x1
-    STR
-    LDI 0x2
-    MOV Y,A
+    STR             ; DISP_3 = 1
+    DEX
     LDI 0x0
-    STR
+    STR             ; DISP_2 = 0
+
 LOAD_LOOP:
-    ; DISP_1 = current RAM value
+    ; Динамическая индикация памяти на DISP_1
     CAL SET_PTR
-    LDI 0x1
-    MOV Y,A
+    LDP 0xF1
     STR
-    ; Read next input nibble
+    
     CAL GETKEY
     LDI 0xF
     SUB B
     JZ ESCAPE
-WRITE_NIBBLE:
-    ; Write B to current RAM address
+
+WRITE_B:
     CAL SET_PTR
-    MOV A,B
+    MOV A,B         ; Восстановление кода клавиши в A
     STR
-    ; Increment low address nibble
-    LDI 0xF
-    MOV X,A
-    LDI 0x2
-    MOV Y,A
-    LDR
-    INC A
-    STR
-    JC ADV_HIGH
+    CAL ADVANCE
     JMP LOAD_LOOP
+
 ESCAPE:
-    ; F0 = end of LOAD, FF = literal F
+    ; Обработка escape-последовательности
     CAL GETKEY
     LDI 0x0
     SUB B
-    JZ MON_INIT
-    LDI 0xF
-    SUB B
-    JZ LITERAL_F
-    JMP MON_INIT
-LITERAL_F:
-    LDI 0xF
-    MOV B,A
-    JMP WRITE_NIBBLE
-RUN:
-    ; Run fixed COM entry point 0x10
-    LDI 0x0
-    MOV Y,A
-    MOV A,B
+    JZ MON_INIT     ; F0 -> Завершение загрузки
+    
+    ; Сохранение второго ниббла в аппаратный стек
+    PHA
+    CAL SET_PTR
+    LDI 0xF         ; ИСПРАВЛЕНИЕ: Загрузка константы после LDRA
     STR
-    LDI 0x1
-    MOV PCH,A
-    LDI 0x0
-    MOV FL,A
-    MOV PCL,A
+    CAL ADVANCE
+    
+    ; Восстановление и запись второго ниббла
+    CAL SET_PTR
+    PLA             ; ИСПРАВЛЕНИЕ: Извлечение сохраненного ниббла из стека
+    STR
+    CAL ADVANCE
+    JMP LOAD_LOOP
+
+RUN:
+    ; DISP_0 = 0xB (RUN Mode)
+    LDP 0xF0
+    LDI 0xB
+    STR
+    ; Прыжок на трамплин
+    JMP RUN_XBNK
+
 SET_PTR:
-    ; X=0xF on entry; DISP_3:DISP_2 = current address
-    LDI 0x3
-    MOV Y,A
+    ; Настройка X:Y из дисплейных регистров без разрушения указателя
+    LDP 0xF3
     LDR
-    MOV PCH,A
-    DEC Y
+    PHA             ; ИСПРАВЛЕНИЕ: Сохранение PCH в стек (не в X)
+    DEX             ; X:Y корректно смещается на 0xF2
     LDR
-    MOV Y,A
-    MOV A,PCH
-    MOV X,A
-    LDRA
+    MOV Y,A         ; Y = PCL
+    PLA             ; Извлечение PCH
+    MOV X,A         ; X = PCH
+    LDRA            ; A = RAM[X:Y] (Кросс-чтение)
     RET
+
+ADVANCE:
+    ; Инкремент PCL
+    LDP 0xF2
+    LDR
+    INC A           ; Строго обновляет Z и C (ISA v4.4)
+    STR
+    JCR ADV_HIGH    ; 2-ниббловый относительный переход при C=1 (+1 ниббл)
+    RET
+
 ADV_HIGH:
-    ; Increment high nibble; E0 means end of COM area
-    LDI 0x3
-    MOV Y,A
+    ; Инкремент PCH
+    INX             ; X:Y = 0xF3
     LDR
     INC A
     STR
+    
+    ; Защита аппаратного стека (0xE0)
     MOV B,A
     LDI 0xE
     SUB B
     JZ MON_INIT
-    JMP LOAD_LOOP
+    RET
+
 GETKEY:
-    ; X:Y = GPI_KBD, B = status mask
-    LDI 0xF
-    MOV X,A
-    LDI 0x4
-    MOV Y,A
+    ; Инициализация указателя и маски
+    LDP 0xF4
     LDI 0x1
-    MOV B,A
+    MOV B,A         ; B = 1
+    
 WAIT_PRESS:
-    ; LDR preserves Z, so AND must update it
-    LDR
+    LDR             ; Чтение GPI_KBD
     AND B
-    JZ WAIT_PRESS
-    ; Read latched key code
-    LDI 0x5
-    MOV Y,A
+    JZR WAIT_PRESS  ; Относительный прыжок (-5 нибблов), ждем 1
+    
+    ; Чтение защелкнутого кода клавиши (KBD_CODE)
+    INX
     LDR
-    MOV PCH,A
-    ; Dynamic key overlay on DISP_1
-    LDI 0x1
-    MOV Y,A
-    MOV A,PCH
+    PHA
+    
+    ; Оверлей нажатия на DISP_1
+    DEX
+    DEX
+    DEX
+    DEX             ; X:Y = 0xF1
     STR
-    ; Wait until key is released
-    LDI 0x4
-    MOV Y,A
+    
+    ; Возврат к порту статуса (0xF4)
+    INX
+    INX
+    INX
+    
 WAIT_RELEASE:
     LDR
-    SUB B
-    JZ WAIT_RELEASE
-    ; Return code in both A and B
-    MOV A,PCH
+    AND B
+    SUB B           ; ИСПРАВЛЕНИЕ: Вычитание маски (1 - 1 = 0 -> Z=1)
+    JZR WAIT_RELEASE; Относительный прыжок (-7 нибблов), ждем 0
+    
+    ; Извлечение кода клавиши и возврат
+    PLA
     MOV B,A
     RET
