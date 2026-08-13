@@ -5,15 +5,15 @@ from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QGroupBox,
 from PyQt6.QtGui import QFontDatabase
 from PyQt6.QtCore import QTimer, Qt
 
-from .cpu import CPU
-from .assembler import Assembler, AssemblerError
-from .editor import CodeEditor
-from .panels import HardwarePanel, MemoryPanel
+from cpu import CPU
+from assembler import Assembler, AssemblerError
+from editor import CodeEditor
+from panels import HardwarePanel, MemoryPanel
 
 class GUI(QWidget):
     def __init__(self, cpu: CPU):
         super().__init__()
-        self.setWindowTitle("NC-1 Debug Board")
+        self.setWindowTitle("NC-1 Debug Board v4.4")
         self.cpu = cpu
         self.assembler = Assembler()
         self.is_running = False
@@ -24,6 +24,7 @@ class GUI(QWidget):
         self.setup_ui()
         self.update_ui()
         
+        # Разрешаем окну перехватывать глобальный фокус ввода
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def setup_ui(self):
@@ -136,6 +137,7 @@ class GUI(QWidget):
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
 
+        # Передача callback'а для обновления UI при изменении флагов кликом
         self.hw_panel = HardwarePanel(self.cpu, self.update_ui)
         right_layout.addWidget(self.hw_panel)
 
@@ -145,21 +147,26 @@ class GUI(QWidget):
         main_layout.addWidget(right_panel)
 
     def keyPressEvent(self, event):
+        """Перехват нажатия аппаратной клавиатуры"""
         if event.isAutoRepeat():
             return super().keyPressEvent(event)
         
+        # Блокируем перехват, если пользователь печатает код в редакторе
         if self.editor.hasFocus():
             return super().keyPressEvent(event)
             
         val = self.hw_panel.key_map.get(event.key())
         if val is not None:
             self.cpu.mmu.hardware_inject_key_press(val)
-            self.hw_panel.keys[val].setDown(True)
+            # Защита на случай, если кнопка еще не отрисована или удалена
+            if val in self.hw_panel.keys:
+                self.hw_panel.keys[val].setDown(True)  
             self.update_ui()
         else:
             super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event):
+        """Перехват отпускания аппаратной клавиатуры"""
         if event.isAutoRepeat():
             return super().keyReleaseEvent(event)
             
@@ -169,7 +176,8 @@ class GUI(QWidget):
         val = self.hw_panel.key_map.get(event.key())
         if val is not None:
             self.cpu.mmu.hardware_inject_key_release()
-            self.hw_panel.keys[val].setDown(False)
+            if val in self.hw_panel.keys:
+                self.hw_panel.keys[val].setDown(False) 
             self.update_ui()
         else:
             super().keyReleaseEvent(event)
@@ -198,7 +206,6 @@ class GUI(QWidget):
             self.update_ui()
             QMessageBox.information(self, "Success", f"Assembled {len(prog)} nibbles to ROM.")
         except (AssemblerError, ValueError) as e:
-            # Вывод ошибки в системную консоль и в UI
             print(f"[ASSEMBLER ERROR] {str(e)}")
             QMessageBox.critical(self, "Assembler Error", str(e))
 
@@ -210,7 +217,6 @@ class GUI(QWidget):
             self.update_ui()
             QMessageBox.information(self, "Success", f"Assembled {len(prog)} nibbles to RAM.")
         except (AssemblerError, ValueError) as e:
-            # Вывод ошибки в системную консоль и в UI
             print(f"[ASSEMBLER ERROR] {str(e)}")
             QMessageBox.critical(self, "Assembler Error", str(e))
 

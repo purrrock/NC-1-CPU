@@ -1,9 +1,9 @@
-from .mmu import MMU
-from .registers import RegisterFile
+from mmu import MMU
+from registers import RegisterFile
 
 class CPU:
     """
-    NC-1 Central Processing Unit.
+    NC-1 Central Processing Unit (v4.4 Variable-Length ISA).
     Combines Register File and MMU. Implements instruction decoding,
     ALU operations, hardware stack, and system calls.
     """
@@ -18,7 +18,7 @@ class CPU:
         self.jumped_this_cycle = False
 
     def reset(self):
-        """Hardware reset of the CPU."""
+        """Hardware reset of the CPU. Restores context to ROM[0x00]."""
         self.regs.reset()
         self.mmu.reset()
         self.halted = False
@@ -45,174 +45,215 @@ class CPU:
         """Pops a nibble from the hardware stack."""
         self.regs.sp = (self.regs.sp + 1) & 0x0F
         addr = 0xE0 | self.regs.sp
-        # Жесткое чтение из RAM (bank_flag = 0), так как стек физически находится в RAM
+        # Hardware constraint: stack is always in RAM (bank 0)
         return self.mmu.read(addr, 0)
+        
+    def _calc_relative_branch(self, disp4: int):
+        """Calculates signed 4-bit relative branch."""
+        # Convert 4-bit unsigned to signed [-8, +7]
+        if disp4 >= 8:
+            disp4 -= 16
+        # The offset is applied to the NEXT instruction's PC (already incremented by fetch)
+        self.regs.pc = (self.regs.pc + disp4) & 0xFF
 
     def step(self):
-        """Executes a single instruction."""
+        """Executes a single variable-length instruction."""
         if self.halted:
             return
 
         self.jumped_this_cycle = False
         opcode = self.fetch()
 
-        # Decode and execute
+        # --- Base Instructions (Opcodes 0..E) ---
         if opcode == 0x0:
-            # NOP
-            pass
-
-        elif opcode == 0x1:
-            # LDI Imm
+            # LDI imm4 (2 nibbles)
             imm = self.fetch()
             self.regs.a = imm
 
-        elif opcode == 0x2:
-            # MOV Mode + Reg
-            operand = self.fetch()
-            d = (operand >> 3) & 1
-            r = operand & 0x07
-
-            if d == 0:
-                # MOV A, Reg (Read register into A)
-                self.regs.a = self.regs.read(r)
-            else:
-                # MOV Reg, A (Write A into register)
-                self.regs.write(r, self.regs.a)
-
-        elif opcode == 0x3:
-            # LDR
+        elif opcode == 0x1:
+            # LDR (1 nibble)
             addr = self.regs.addr
             self.regs.a = self.mmu.read(addr, self.regs.get_flag_m())
 
-        elif opcode == 0x4:
-            # STR
+        elif opcode == 0x2:
+            # STR (1 nibble)
             addr = self.regs.addr
             self.mmu.write(addr, self.regs.a)
 
+        elif opcode == 0x3:
+            # RET (1 nibble)
+            pcl = self.pop()
+            pch = self.pop()
+            self.regs.pc = (pch << 4) | pcl
+
+        elif opcode == 0x4:
+            # PHA (1 nibble)
+            self.push(self.regs.a)
+
         elif opcode == 0x5:
-            # ADD Reg (Опкод 5)
-            operand = self.fetch()
-            r = operand & 0x07        # Извлечение 3-битного ID регистра (RRR)
-            val1 = self.regs.a
-            val2 = self.regs.read(r)
-
-            res = val1 + val2
-            self.regs.a = res & 0x0F  # Аппаратное усечение до 4 бит (по модулю 16)
-
-            # Обновление флагов (FL)
-            # Carry (Переполнение): взводится, если сумма превысила 4 бита (15)
-            self.regs.set_flag_c(1 if res > 0x0F else 0)
-            # Zero (Нулевой результат): проверяется только 4-битный результат
-            self.regs.set_flag_z(1 if (res & 0x0F) == 0 else 0)
+            # PLA (1 nibble)
+            self.regs.a = self.pop()
 
         elif opcode == 0x6:
-            # SUB Reg (Опкод 6)
-            operand = self.fetch()
-            r = operand & 0x07
-            val1 = self.regs.a
-            val2 = self.regs.read(r)
-
-            res = val1 - val2
-            self.regs.a = res & 0x0F  # Усечение обрабатывает отрицательные числа (Two's complement)
-
-            # Carry в вычитании работает как инвертированный флаг заёма (Borrow).
-            # Если val1 >= val2, заём не требуется, флаг C = 1.
-            self.regs.set_flag_c(1 if val1 >= val2 else 0)
-            self.regs.set_flag_z(1 if (res & 0x0F) == 0 else 0)
+            # INX (1 nibble) - 16-bit increment
+            val = self.regs.addr
+            res = (val + 1) & 0xFF
+            self.regs.addr = res
+            self.regs.set_flag_c(1 if val == 0xFF else 0)
+            self.regs.set_flag_z(1 if res == 0 else 0)
 
         elif opcode == 0x7:
-            # AND Reg
-            operand = self.fetch()
-            r = operand & 0x07
-            res = self.regs.a & self.regs.read(r)
-            self.regs.a = res
+            # DEX (1 nibble) - 16-bit decrement
+            val = self.regs.addr
+            res = (val - 1) & 0xFF
+            self.regs.addr = res
+            self.regs.set_flag_c(1 if val == 0x00 else 0) # Underflow generates Carry
             self.regs.set_flag_z(1 if res == 0 else 0)
 
         elif opcode == 0x8:
-            # XOR Reg
-            operand = self.fetch()
-            r = operand & 0x07
-            res = self.regs.a ^ self.regs.read(r)
+            # INC A (1 nibble)
+            val = self.regs.a
+            res = (val + 1) & 0x0F
             self.regs.a = res
+            self.regs.set_flag_c(1 if val == 0x0F else 0)
             self.regs.set_flag_z(1 if res == 0 else 0)
 
         elif opcode == 0x9:
-            # INC Reg
-            operand = self.fetch()
-            r = operand & 0x07
-            val = self.regs.read(r)
-            res = (val + 1) & 0x0F
-            self.regs.write(r, res)
-            # Typically INC/DEC set Zero flag, maybe not Carry to allow loop counters without breaking math
+            # DEC A (1 nibble)
+            val = self.regs.a
+            res = (val - 1) & 0x0F
+            self.regs.a = res
+            self.regs.set_flag_c(1 if val == 0x00 else 0)
             self.regs.set_flag_z(1 if res == 0 else 0)
 
         elif opcode == 0xA:
-            # DEC Reg
-            operand = self.fetch()
-            r = operand & 0x07
-            val = self.regs.read(r)
-            res = (val - 1) & 0x0F
-            self.regs.write(r, res)
-            self.regs.set_flag_z(1 if res == 0 else 0)
+            # MOV A, B (1 nibble)
+            self.regs.a = self.regs.b
 
         elif opcode == 0xB:
-            # JZ Addr
-            addr_h = self.fetch()
-            addr_l = self.fetch()
-            if self.regs.get_flag_z() == 1:
-                self.regs.pc = (addr_h << 4) | addr_l
+            # MOV B, A (1 nibble)
+            self.regs.b = self.regs.a
 
         elif opcode == 0xC:
-            # JC Addr
-            addr_h = self.fetch()
-            addr_l = self.fetch()
-            if self.regs.get_flag_c() == 1:
-                self.regs.pc = (addr_h << 4) | addr_l
+            # JZR disp4 (2 nibbles)
+            disp4 = self.fetch()
+            if self.regs.get_flag_z() == 1:
+                self._calc_relative_branch(disp4)
 
         elif opcode == 0xD:
-            # JMP Addr
-            addr_h = self.fetch()
-            addr_l = self.fetch()
-            self.regs.pc = (addr_h << 4) | addr_l
+            # JCR disp4 (2 nibbles)
+            disp4 = self.fetch()
+            if self.regs.get_flag_c() == 1:
+                self._calc_relative_branch(disp4)
 
         elif opcode == 0xE:
-            # CAL Addr
-            addr_h = self.fetch()
-            addr_l = self.fetch()
-            # Push PC (Return address)
-            ret_pc = self.regs.pc
-            self.push((ret_pc >> 4) & 0x0F) # PCH
-            self.push(ret_pc & 0x0F)        # PCL
-            self.regs.pc = (addr_h << 4) | addr_l
+            # JR disp4 (2 nibbles)
+            disp4 = self.fetch()
+            self._calc_relative_branch(disp4)
 
+        # --- Extended Instructions (Prefix F) ---
         elif opcode == 0xF:
-            # SYS Function
-            func = self.fetch()
-            if func == 0x0:
-                self.halted = True
-            elif func == 0x1:
-                # RET
-                pcl = self.pop()
-                pch = self.pop()
-                self.regs.pc = (pch << 4) | pcl
-            elif func == 0x4:
-                # SWI
-                self.mmu.spc_l = self.regs.pcl
-                self.mmu.spc_h = self.regs.pch
-                self.regs.set_flag_m(1)
-                self.regs.pc = 0x00
-            elif func == 0x5:
-                # RETU
-                self.regs.pcl = self.mmu.spc_l
-                self.regs.pch = self.mmu.spc_h
-                self.regs.set_flag_m(0)
-            elif func == 0x6:
-                # LDRA (Load Alternate Bank)
-                # Вычисление целевого банка через XOR-логику: Target_Bank = M ^ 1
+            subop = self.fetch()
+
+            if subop == 0x0:
+                # F0 MOV Reg [D RRR] (3 nibbles)
+                operand = self.fetch()
+                d = (operand >> 3) & 1
+                r = operand & 0x07
+                if d == 0:
+                    self.regs.a = self.regs.read(r)
+                else:
+                    self.regs.write(r, self.regs.a)
+
+            elif subop == 0x1:
+                # F1 XCHG (2 nibbles)
+                temp = self.regs.a
+                self.regs.a = self.regs.b
+                self.regs.b = temp
+
+            elif subop == 0x2:
+                # F2 ADD B (2 nibbles)
+                res = self.regs.a + self.regs.b
+                self.regs.a = res & 0x0F
+                self.regs.set_flag_c(1 if res > 0x0F else 0)
+                self.regs.set_flag_z(1 if (res & 0x0F) == 0 else 0)
+
+            elif subop == 0x3:
+                # F3 SUB B (2 nibbles)
+                val1 = self.regs.a
+                val2 = self.regs.b
+                res = val1 - val2
+                self.regs.a = res & 0x0F
+                self.regs.set_flag_c(1 if val1 >= val2 else 0) # Borrow logic
+                self.regs.set_flag_z(1 if (res & 0x0F) == 0 else 0)
+
+            elif subop == 0x4:
+                # F4 AND B (2 nibbles)
+                res = self.regs.a & self.regs.b
+                self.regs.a = res
+                self.regs.set_flag_c(0)
+                self.regs.set_flag_z(1 if res == 0 else 0)
+
+            elif subop == 0x5:
+                # F5 XOR B (2 nibbles)
+                res = self.regs.a ^ self.regs.b
+                self.regs.a = res
+                self.regs.set_flag_c(0)
+                self.regs.set_flag_z(1 if res == 0 else 0)
+
+            elif subop == 0x6:
+                # F6 LDRA (2 nibbles)
                 alt_m = self.regs.get_flag_m() ^ 1
                 addr = self.regs.addr
                 self.regs.a = self.mmu.read(addr, alt_m)
 
-        # If PCL was directly written by an instruction (like MOV PCL, A),
-        # it flushes pipeline/jumps automatically because pc gets updated by property setters,
-        # but the cycle already fetched instructions. We just let it continue from new PC.
+            elif subop == 0x7:
+                # F7 XBNK (2 nibbles)
+                current_m = self.regs.get_flag_m()
+                self.regs.set_flag_m(current_m ^ 1)
+
+            elif subop == 0x8:
+                # F8 LDP Hi Lo (3 nibbles)
+                addr_h = self.fetch()
+                addr_l = self.fetch()
+                self.regs.x = addr_h
+                self.regs.y = addr_l
+
+            elif subop == 0x9:
+                # F9 BOOT (2 nibbles)
+                self.regs.pc = 0x00
+                self.regs.sp = 0x0F
+                self.regs.set_flag_m(1)
+
+            elif subop == 0xA:
+                # FA JZ Hi Lo (4 nibbles)
+                addr_h = self.fetch()
+                addr_l = self.fetch()
+                if self.regs.get_flag_z() == 1:
+                    self.regs.pc = (addr_h << 4) | addr_l
+
+            elif subop == 0xB:
+                # FB JC Hi Lo (4 nibbles)
+                addr_h = self.fetch()
+                addr_l = self.fetch()
+                if self.regs.get_flag_c() == 1:
+                    self.regs.pc = (addr_h << 4) | addr_l
+
+            elif subop == 0xC:
+                # FC JMP Hi Lo (4 nibbles)
+                addr_h = self.fetch()
+                addr_l = self.fetch()
+                self.regs.pc = (addr_h << 4) | addr_l
+
+            elif subop == 0xD:
+                # FD CAL Hi Lo (4 nibbles)
+                addr_h = self.fetch()
+                addr_l = self.fetch()
+                ret_pc = self.regs.pc
+                self.push((ret_pc >> 4) & 0x0F) # Push PCH
+                self.push(ret_pc & 0x0F)        # Push PCL
+                self.regs.pc = (addr_h << 4) | addr_l
+
+            elif subop == 0xE or subop == 0xF:
+                # Reserved -> Acts as NOP (2 nibbles)
+                pass

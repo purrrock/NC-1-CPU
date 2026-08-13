@@ -1,3 +1,4 @@
+import os
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QGroupBox,
                              QLabel, QPushButton, QTabWidget, QTableWidget,
                              QTableWidgetItem, QHeaderView, QGridLayout)
@@ -29,11 +30,11 @@ class HardwarePanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
         
-        # Верхний ряд: Слева (Регистры + Флаги), Справа (Клавиатура)
+        # Верхняя секция: Слева (Регистры + Флаги), Справа (Матричная клавиатура)
         top_hw_layout = QHBoxLayout()
         top_hw_layout.setSpacing(6)
 
-        # Левый блок: Регистры сверху, Флаги снизу
+        # Левый столбец: Регистры сверху, Флаги снизу
         left_top_vbox = QVBoxLayout()
         left_top_vbox.setContentsMargins(0, 0, 0, 0)
         left_top_vbox.setSpacing(4)
@@ -63,7 +64,7 @@ class HardwarePanel(QWidget):
             reg_layout.addWidget(lbl_val, row, col + 1)
             self.reg_labels[reg] = lbl_val
 
-        # Индикатор AUDIO (F6) в регистровой панели
+        # Индикатор AUDIO (F6) внутри блока регистров
         lbl_audio = QLabel("AUDIO:")
         self.audio_led = QLabel()
         self.audio_led.setFixedSize(12, 12)
@@ -73,7 +74,7 @@ class HardwarePanel(QWidget):
         
         left_top_vbox.addWidget(reg_group)
 
-        # Флаги ПОД регистрами
+        # Панель флагов
         flags_group = QGroupBox("Flags")
         flags_layout = QHBoxLayout(flags_group)
         flags_layout.setContentsMargins(6, 4, 6, 4)
@@ -93,16 +94,11 @@ class HardwarePanel(QWidget):
         left_top_vbox.addWidget(flags_group)
         top_hw_layout.addLayout(left_top_vbox)
 
-        # Правый верхний угол: Keypad (F4-F5)
+        # Клавиатура Keypad (F4-F5) в правом верхнем углу
         keypad_group = QGroupBox("Keypad (F4-F5)")
         keypad_layout = QGridLayout(keypad_group)
         keypad_layout.setContentsMargins(6, 6, 6, 6)
         keypad_layout.setSpacing(3)
-
-        if hasattr(self.cpu.mmu, 'hardware_inject_key') and not hasattr(self.cpu.mmu, 'hardware_inject_key_press'):
-            self.cpu.mmu.hardware_inject_key_press = self.cpu.mmu.hardware_inject_key
-        if hasattr(self.cpu.mmu, 'hardware_release_key') and not hasattr(self.cpu.mmu, 'hardware_inject_key_release'):
-            self.cpu.mmu.hardware_inject_key_release = self.cpu.mmu.hardware_release_key
 
         for r in range(4):
             for c in range(4):
@@ -117,8 +113,13 @@ class HardwarePanel(QWidget):
         top_hw_layout.addWidget(keypad_group)
         layout.addLayout(top_hw_layout)
 
-        # Компактные 7-сегментные дисплеи MMIO (F3-F0)
-        font_id = QFontDatabase.addApplicationFont("emu/assets/Segment7Standard.otf")
+        # 7-сегментные дисплеи MMIO (F3-F0)
+        # Динамическое определение пути к assets/Segment7Standard.otf
+        font_path = os.path.join(os.path.dirname(__file__), "assets", "Segment7Standard.otf")
+        if not os.path.exists(font_path):
+            font_path = os.path.join("assets", "Segment7Standard.otf")
+
+        font_id = QFontDatabase.addApplicationFont(font_path)
         if font_id != -1:
             family = QFontDatabase.applicationFontFamilies(font_id)[0]
             seg_font = QFont(family, 26)
@@ -204,7 +205,7 @@ class MemoryPanel(QWidget):
         self.notebook.addTab(self.rom_tree, "ROM (System)")
         self.notebook.addTab(self.ram_tree, "RAM (User)")
 
-        self.disasm_label = QLabel(" 00: NOP ")
+        self.disasm_label = QLabel(" 00: LDI 0x0 ")
         self.disasm_label.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
         self.disasm_label.setStyleSheet("color: blue; font-weight: bold; padding: 0px 8px;")
         self.disasm_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -241,47 +242,86 @@ class MemoryPanel(QWidget):
         vheader.setMinimumSectionSize(16)
         return tree
 
-    def disassemble_current_instruction(self):
+    def disassemble_current_instruction(self) -> str:
+        """Динамический дизассемблер инструкций переменной длины ISA v4.4."""
         regs = self.cpu.regs
         pc = regs.pc
         m_flag = regs.get_flag_m()
-        read = lambda addr: self.cpu.mmu.read(addr, m_flag)
+        read = lambda offset: self.cpu.mmu.read((pc + offset) & 0xFF, m_flag)
         REG_MAP = {0: "A", 1: "B", 2: "X", 3: "Y", 4: "SP", 5: "FL", 6: "PCH", 7: "PCL"}
 
-        opcode = read(pc)
-        if opcode == 0x0: return "NOP"
-        elif opcode == 0x3: return "LDR"
-        elif opcode == 0x4: return "STR"
+        opcode = read(0)
+
+        # --- Базовые инструкции (0..E) ---
+        if opcode == 0x0:
+            imm = read(1)
+            return "NOP" if imm == 0 else f"LDI 0x{imm:X}"
         elif opcode == 0x1:
-            imm = read((pc + 1) & 0xFF)
-            return f"LDI 0x{imm:X}"
+            return "LDR"
         elif opcode == 0x2:
-            op = read((pc + 1) & 0xFF)
-            d = (op >> 3) & 1
-            r = op & 0x07
-            reg_name = REG_MAP.get(r, f"R{r}")
-            if d == 0: return f"MOV A, {reg_name}"
-            else: return f"MOV {reg_name}, A"
-        elif opcode in (0x5, 0x6, 0x7, 0x8, 0x9, 0xA):
-            mnemonics = {0x5: "ADD", 0x6: "SUB", 0x7: "AND", 0x8: "XOR", 0x9: "INC", 0xA: "DEC"}
-            op = read((pc + 1) & 0xFF)
-            r = op & 0x07
-            reg_name = REG_MAP.get(r, f"R{r}")
-            return f"{mnemonics[opcode]} {reg_name}"
-        elif opcode in (0xB, 0xC, 0xD, 0xE):
-            mnemonics = {0xB: "JZ", 0xC: "JC", 0xD: "JMP", 0xE: "CAL"}
-            h = read((pc + 1) & 0xFF)
-            l = read((pc + 2) & 0xFF)
-            addr = (h << 4) | l
-            return f"{mnemonics[opcode]} 0x{addr:02X}"
+            return "STR"
+        elif opcode == 0x3:
+            return "RET"
+        elif opcode == 0x4:
+            return "PHA"
+        elif opcode == 0x5:
+            return "PLA"
+        elif opcode == 0x6:
+            return "INX"
+        elif opcode == 0x7:
+            return "DEX"
+        elif opcode == 0x8:
+            return "INC A"
+        elif opcode == 0x9:
+            return "DEC A"
+        elif opcode == 0xA:
+            return "MOV A, B"
+        elif opcode == 0xB:
+            return "MOV B, A"
+        elif opcode in (0xC, 0xD, 0xE):
+            mnemonics = {0xC: "JZR", 0xD: "JCR", 0xE: "JR"}
+            disp4 = read(1)
+            # Перевод 4-битного смещения в знаковое [-8, +7]
+            offset = disp4 - 16 if disp4 >= 8 else disp4
+            target_addr = (pc + 2 + offset) & 0xFF
+            return f"{mnemonics[opcode]} 0x{target_addr:02X}"
+
+        # --- Расширенные инструкции (Префикс F) ---
         elif opcode == 0xF:
-            func = read((pc + 1) & 0xFF)
-            if func == 0x0: return "HLT"
-            elif func == 0x1: return "RET"
-            elif func == 0x4: return "SWI"
-            elif func == 0x5: return "RETU"
-            elif func == 0x6: return "LDRA"
-            else: return f"SYS 0x{func:X}"
+            subop = read(1)
+            if subop == 0x0:
+                operand = read(2)
+                d = (operand >> 3) & 1
+                r = operand & 0x07
+                reg_name = REG_MAP.get(r, f"R{r}")
+                return f"MOV A, {reg_name}" if d == 0 else f"MOV {reg_name}, A"
+            elif subop == 0x1:
+                return "XCHG"
+            elif subop == 0x2:
+                return "ADD B"
+            elif subop == 0x3:
+                return "SUB B"
+            elif subop == 0x4:
+                return "AND B"
+            elif subop == 0x5:
+                return "XOR B"
+            elif subop == 0x6:
+                return "LDRA"
+            elif subop == 0x7:
+                return "XBNK"
+            elif subop == 0x8:
+                h, l = read(2), read(3)
+                return f"LDP 0x{(h << 4) | l:02X}"
+            elif subop == 0x9:
+                return "BOOT"
+            elif subop in (0xA, 0xB, 0xC, 0xD):
+                mnemonics = {0xA: "JZ", 0xB: "JC", 0xC: "JMP", 0xD: "CAL"}
+                h, l = read(2), read(3)
+                target_addr = (h << 4) | l
+                return f"{mnemonics[subop]} 0x{target_addr:02X}"
+            elif subop in (0xE, 0xF):
+                return "RESERVED"
+
         return f"UNK 0x{opcode:X}"
 
     def update_mem_tree(self, tree, bank_flag, highlight_pc):

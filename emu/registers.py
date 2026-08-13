@@ -1,135 +1,182 @@
 class RegisterFile:
     """
-    Register File for NC-1 CPU.
-    Contains 8 orthogonal registers. Handles specific behaviors like
-    flags mapping and JUMP-on-PCL-write logic.
+    Register File for NC-1 CPU (ISA v4.4).
+    Contains 8 4-bit registers:
+    0: A   (Accumulator)
+    1: B   (Auxiliary)
+    2: X   (Index High)
+    3: Y   (Index Low)
+    4: SP  (Stack Pointer)
+    5: FL  (Flags: Bit 3 Reserved, Bit 2 M, Bit 1 C, Bit 0 Z)
+    6: PCH (PC High)
+    7: PCL (PC Low)
     """
+    REG_A = 0
+    REG_B = 1
+    REG_X = 2
+    REG_Y = 3
+    REG_SP = 4
+    REG_FL = 5
+    REG_PCH = 6
+    REG_PCL = 7
+
     def __init__(self):
-        # 8 registers, 4 bits each
         self.regs = [0] * 8
-
-        # ID Constants
-        self.REG_A = 0
-        self.REG_B = 1
-        self.REG_X = 2
-        self.REG_Y = 3
-        self.REG_SP = 4
-        self.REG_FL = 5
-        self.REG_PCH = 6
-        self.REG_PCL = 7
-
-        # Callback for when PCL is written to (to flush pipeline/jump)
         self.on_pcl_write = None
+        self.reset()
 
-    def read(self, reg_id: int) -> int:
-        """Reads a nibble from a register."""
-        reg_id &= 0x07
-        return self.regs[reg_id]
+    def reset(self):
+        """Resets registers to hardware reset state (PC=0x00, SP=0x0F, M=1)."""
+        self.regs = [0] * 8
+        self.sp = 0x0F
+        self.set_flag_m(1)  # M=1 (System Bank / ROM) on reset
 
-    def write(self, reg_id: int, value: int):
-        """
-        Writes a nibble to a register.
-        Handles JUMP-on-PCL-write logic.
-        """
-        reg_id &= 0x07
-        value &= 0x0F
+    # --- Individual Register Properties ---
+    @property
+    def a(self) -> int:
+        return self.regs[self.REG_A]
 
-        self.regs[reg_id] = value
+    @a.setter
+    def a(self, val: int):
+        self.regs[self.REG_A] = val & 0x0F
 
-        # JUMP-on-PCL-write:
-        # When PCL is updated by a register write (e.g., MOV PCL, A),
-        # it causes an immediate jump to PCH:NewPCL.
-        # The CPU needs to know this happened to adjust its instruction flow.
-        if reg_id == self.REG_PCL and self.on_pcl_write is not None:
+    @property
+    def b(self) -> int:
+        return self.regs[self.REG_B]
+
+    @b.setter
+    def b(self, val: int):
+        self.regs[self.REG_B] = val & 0x0F
+
+    @property
+    def x(self) -> int:
+        return self.regs[self.REG_X]
+
+    @x.setter
+    def x(self, val: int):
+        self.regs[self.REG_X] = val & 0x0F
+
+    @property
+    def y(self) -> int:
+        return self.regs[self.REG_Y]
+
+    @y.setter
+    def y(self, val: int):
+        self.regs[self.REG_Y] = val & 0x0F
+
+    @property
+    def sp(self) -> int:
+        return self.regs[self.REG_SP]
+
+    @sp.setter
+    def sp(self, val: int):
+        self.regs[self.REG_SP] = val & 0x0F
+
+    @property
+    def fl(self) -> int:
+        return self.regs[self.REG_FL] & 0x0F
+
+    @fl.setter
+    def fl(self, val: int):
+        self.regs[self.REG_FL] = val & 0x0F
+
+    @property
+    def pch(self) -> int:
+        return self.regs[self.REG_PCH]
+
+    @pch.setter
+    def pch(self, val: int):
+        self.regs[self.REG_PCH] = val & 0x0F
+
+    @property
+    def pcl(self) -> int:
+        return self.regs[self.REG_PCL]
+
+    @pcl.setter
+    def pcl(self, val: int):
+        self.regs[self.REG_PCL] = val & 0x0F
+        if self.on_pcl_write:
             self.on_pcl_write()
 
-    # --- Properties for easy access by CPU ---
-
+    # --- Abstract Combined Properties ---
     @property
-    def a(self): return self.regs[self.REG_A]
-    @a.setter
-    def a(self, val): self.regs[self.REG_A] = val & 0x0F
-
-    @property
-    def b(self): return self.regs[self.REG_B]
-    @b.setter
-    def b(self, val): self.regs[self.REG_B] = val & 0x0F
-
-    @property
-    def x(self): return self.regs[self.REG_X]
-    @x.setter
-    def x(self, val): self.regs[self.REG_X] = val & 0x0F
-
-    @property
-    def y(self): return self.regs[self.REG_Y]
-    @y.setter
-    def y(self, val): self.regs[self.REG_Y] = val & 0x0F
-
-    @property
-    def sp(self): return self.regs[self.REG_SP]
-    @sp.setter
-    def sp(self, val): self.regs[self.REG_SP] = val & 0x0F
-
-    @property
-    def pch(self): return self.regs[self.REG_PCH]
-    @pch.setter
-    def pch(self, val): self.regs[self.REG_PCH] = val & 0x0F
-
-    @property
-    def pcl(self): return self.regs[self.REG_PCL]
-    @pcl.setter
-    def pcl(self, val):
-        self.regs[self.REG_PCL] = val & 0x0F
-        # Note: Direct assignment to property does NOT trigger on_pcl_write.
-        # This is used by CPU for normal PC incrementing.
-        # on_pcl_write is only for EXPLICIT writes via write() method (instructions).
-
-    # PC abstraction (8-bit)
-    @property
-    def pc(self):
+    def pc(self) -> int:
+        """8-bit Program Counter (PCH:PCL)."""
         return (self.pch << 4) | self.pcl
+
     @pc.setter
-    def pc(self, val):
+    def pc(self, val: int):
         val &= 0xFF
         self.pch = (val >> 4) & 0x0F
         self.pcl = val & 0x0F
 
-    # Address abstraction (X:Y)
     @property
-    def addr(self):
+    def addr(self) -> int:
+        """8-bit Memory Address Pointer (X:Y)."""
         return (self.x << 4) | self.y
 
-    # --- Flags Abstraction ---
-    # Bit 3: R (Reset), Bit 2: M (Mode), Bit 1: C (Carry), Bit 0: Z (Zero)
+    @addr.setter
+    def addr(self, val: int):
+        val &= 0xFF
+        self.x = (val >> 4) & 0x0F
+        self.y = val & 0x0F
 
-    @property
-    def fl(self): return self.regs[self.REG_FL]
-    @fl.setter
-    def fl(self, val): self.regs[self.REG_FL] = val & 0x0F
+    # --- Flag Helpers ---
+    def get_flag_z(self) -> int:
+        """Bit 0: Zero Flag."""
+        return self.fl & 1
 
-    def get_flag_r(self): return (self.fl >> 3) & 1
-    def set_flag_r(self, val):
-        if val: self.fl |= 0b1000
-        else:   self.fl &= 0b0111
+    def set_flag_z(self, val: int | bool):
+        if val:
+            self.fl |= 0b0001
+        else:
+            self.fl &= 0b1110
 
-    def get_flag_m(self): return (self.fl >> 2) & 1
-    def set_flag_m(self, val):
-        if val: self.fl |= 0b0100
-        else:   self.fl &= 0b1011
+    def get_flag_c(self) -> int:
+        """Bit 1: Carry Flag."""
+        return (self.fl >> 1) & 1
 
-    def get_flag_c(self): return (self.fl >> 1) & 1
-    def set_flag_c(self, val):
-        if val: self.fl |= 0b0010
-        else:   self.fl &= 0b1101
+    def set_flag_c(self, val: int | bool):
+        if val:
+            self.fl |= 0b0010
+        else:
+            self.fl &= 0b1101
 
-    def get_flag_z(self): return self.fl & 1
-    def set_flag_z(self, val):
-        if val: self.fl |= 0b0001
-        else:   self.fl &= 0b1110
+    def get_flag_m(self) -> int:
+        """Bit 2: Execution Bank Flag (1=System/ROM, 0=User/RAM)."""
+        return (self.fl >> 2) & 1
 
-    def reset(self):
-        """Hardware reset initialization."""
-        self.pc = 0x00
-        self.sp = 0x0F
-        # FL: R=1, M=1, C=0, Z=0 -> 1100b = 0xC
-        self.fl = 0xC
+    def set_flag_m(self, val: int | bool):
+        if val:
+            self.fl |= 0b0100
+        else:
+            self.fl &= 0b1011
+
+    def get_flag_r(self) -> int:
+        """Bit 3: Reserved (kept for GUI compatibility)."""
+        return (self.fl >> 3) & 1
+
+    def set_flag_r(self, val: int | bool):
+        if val:
+            self.fl |= 0b1000
+        else:
+            self.fl &= 0b0111
+
+    # --- Generic Read/Write by 3-bit Register ID ---
+    def read(self, reg_id: int) -> int:
+        """Reads 4-bit value from register by 3-bit ID (0..7)."""
+        reg_id &= 0x07
+        if reg_id == self.REG_FL:
+            return self.fl & 0x07  # Bit 3 reads as 0
+        return self.regs[reg_id] & 0x0F
+
+    def write(self, reg_id: int, val: int):
+        """Writes 4-bit value to register by 3-bit ID (0..7)."""
+        reg_id &= 0x07
+        val &= 0x0F
+        if reg_id == self.REG_PCL:
+            self.pcl = val  # Triggers on_pcl_write callback
+        elif reg_id == self.REG_FL:
+            self.fl = val
+        else:
+            self.regs[reg_id] = val

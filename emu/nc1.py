@@ -1,9 +1,11 @@
 import sys
 from PyQt6.QtWidgets import QApplication
-from .mmu import MMU
-from .registers import RegisterFile
-from .cpu import CPU
-from .gui import GUI
+
+# Убраны точки перед именами модулей (абсолютный импорт)
+from mmu import MMU
+from registers import RegisterFile
+from cpu import CPU
+from gui import GUI
 
 def main():
     app = QApplication(sys.argv)

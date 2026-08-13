@@ -2,7 +2,7 @@ import random
 
 class MMU:
     """
-    Memory Management Unit for NC-1 CPU.
+    Memory Management Unit for NC-1 CPU (ISA v4.4).
     Handles dual-bank memory (ROM and RAM), memory-mapped I/O (MMIO),
     and Shadow Write logic.
     """
@@ -11,12 +11,10 @@ class MMU:
         self.ram = [0] * 256
 
         # MMIO State
-        self.displays = [0, 0, 0, 0]
-        self.kbd_stat = 0
-        self.kbd_code = 0
-        self.audio = 0
-        self.spc_l = 0
-        self.spc_h = 0
+        self.displays = [0, 0, 0, 0]  # F0-F3
+        self.kbd_stat = 0             # F4
+        self.kbd_code = 0             # F5
+        self.audio = 0                # F6 (GPO_AUD)
 
         self.rng_func = lambda: random.randint(0, 15)
         
@@ -24,19 +22,20 @@ class MMU:
         self.audio_callback = None
         self.display_callback = None
 
-    def read(self, address: int, m_flag: int) -> int:
+    def read(self, address: int, bank_flag: int) -> int:
         """
         Reads a nibble from memory or MMIO.
-        Active memory bank depends on the M flag:
+        Active memory bank depends on the execution mode (M) or cross-bank logic:
         1 = System (ROM)
         0 = User (RAM)
         """
         address &= 0xFF
 
+        # MMIO Space is unified across both banks
         if address >= 0xF0:
             return self._mmio_read(address)
 
-        if m_flag == 1:
+        if bank_flag == 1:
             return self.rom[address]
         else:
             return self.ram[address]
@@ -45,7 +44,7 @@ class MMU:
         """
         Writes a nibble to memory or MMIO.
         SHADOW WRITE LOGIC:
-        Writes are ALWAYS performed to RAM, regardless of the M flag.
+        Writes are ALWAYS performed to RAM, regardless of the bank_flag.
         This allows the OS to load programs into RAM while executing from ROM.
         """
         address &= 0xFF
@@ -54,27 +53,29 @@ class MMU:
         if address >= 0xF0:
             self._mmio_write(address, value)
         else:
-            # Shadow write: always to RAM
+            # Shadow write: always unconditionally to RAM
             self.ram[address] = value
 
     def _mmio_read(self, address: int) -> int:
-        """Handles reading from Memory-Mapped I/O."""
-        if address == 0xF4:
+        """Handles reading from Memory-Mapped I/O (0xF0-0xFF)."""
+        if 0xF0 <= address <= 0xF3:
+            # Displays are Read/Write in v4.4
+            return self.displays[address - 0xF0]
+        elif address == 0xF4:
             return self.kbd_stat & 0x01
         elif address == 0xF5:
             return self.kbd_code & 0x0F
+        elif address == 0xF6:
+            # GPO_AUD is Read/Write
+            return self.audio & 0x0F
         elif address == 0xF7:
             return self.rng_func() & 0x0F
-        elif address == 0xFE:
-            return self.spc_l & 0x0F
-        elif address == 0xFF:
-            return self.spc_h & 0x0F
-        # Other addresses (like displays, audio) might not be explicitly readable in hardware,
-        # but returning 0 is safe for undefined behavior.
+        
+        # 0xF8 - 0xFF are Reserved / Unmapped
         return 0
 
     def _mmio_write(self, address: int, value: int):
-        """Handles writing to Memory-Mapped I/O."""
+        """Handles writing to Memory-Mapped I/O (0xF0-0xFF)."""
         if 0xF0 <= address <= 0xF3:
             idx = address - 0xF0
             self.displays[idx] = value
@@ -83,15 +84,10 @@ class MMU:
                 
         elif address == 0xF6:
             new_audio_state = value & 0x01
-            # Вызываем callback только при фактическом изменении состояния
-            if self.audio_callback and self.audio != new_audio_state:
+            # Вызываем callback только при фактическом изменении состояния нулевого бита (Speaker)
+            if self.audio_callback and (self.audio & 0x01) != new_audio_state:
                 self.audio_callback(new_audio_state)
-            self.audio = new_audio_state
-            
-        elif address == 0xFE:
-            self.spc_l = value
-        elif address == 0xFF:
-            self.spc_h = value
+            self.audio = value
 
     def load_rom(self, program: list[int]):
         """Загружает программу в ROM с проверкой переполнения банка."""
@@ -125,10 +121,8 @@ class MMU:
         self.kbd_stat = 0
 
     def reset(self):
-        """Resets MMIO state."""
+        """Resets MMIO state to 0."""
         self.displays = [0, 0, 0, 0]
         self.kbd_stat = 0
         self.kbd_code = 0
         self.audio = 0
-        self.spc_l = 0
-        self.spc_h = 0
