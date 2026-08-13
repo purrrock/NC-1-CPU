@@ -5,7 +5,7 @@ class AssemblerError(Exception):
 
 class Assembler:
     """
-    Two-pass assembler for NC-1 CPU (ISA v4.4 Variable-Length).
+    Two-pass assembler for NC-1 CPU (ISA v4.5 Variable-Length).
     Includes ORG, DN, DB directives, bound checks, relative jumps, and syntax synonyms.
     """
     def __init__(self):
@@ -89,14 +89,13 @@ class Assembler:
                     std_opcode = "MOV_REG"; size = 3 # F0 MOV Reg
 
             # 2-Nibble Instructions
-            elif opcode in ("LDI", "JZR", "JCR", "JR", "XCHG", "ADD", "SUB", "AND", "XOR", "LDRA", "XBNK", "BOOT"):
+            elif opcode in ("LDI", "JZR", "JCR", "JR", "XCHG", "ADD", "SUB", "AND", "XOR", "LDRA", "XBNK", "BOOT", "HLT"):
                 size = 2
             elif opcode == "NOP":
-                # В v4.4 NOP транслируется в зарезервированную команду 0xFE
+                # В v4.5 NOP транслируется в JR +0 (E 0)
                 std_opcode = "NOP"; size = 2 
 
             # 4-Nibble Instructions
-            # ИСПРАВЛЕНИЕ: LDP — это 4-ниббловая команда (F 8 Hi Lo), а не 3!
             elif opcode in ("JZ", "JC", "JMP", "CAL", "LDP"):
                 size = 4
             else:
@@ -136,7 +135,8 @@ class Assembler:
 
             # --- Base Opcodes (0-E) ---
             if opcode == "NOP":
-                program.extend([0xF, 0xE])
+                # NOP = JR +0 (E 0)
+                program.extend([0xE, 0x0])
                 pc += 2
             elif opcode == "LDI":
                 if len(args) != 1: raise AssemblerError(f"LDI expects 1 argument (line {line_num+1})")
@@ -185,12 +185,11 @@ class Assembler:
                 if len(args) != 1: raise AssemblerError(f"{opcode} expects 1 arg (line {line_num+1})")
                 target = self._parse_val(args[0], labels)
                 
-                # Вычисление относительного адреса. PC процессора уже инкрементирован на 2 при чтении команды.
                 offset = target - (instr_pc + 2)
                 if not (-8 <= offset <= 7):
                     raise AssemblerError(f"Relative jump '{opcode}' out of bounds [-8, +7]. Offset is {offset} (line {line_num+1})")
                 
-                disp4 = offset & 0x0F # Конвертация в 4-битное знаковое дополнение до двух
+                disp4 = offset & 0x0F
                 if opcode == "JZR": program.extend([0xC, disp4])
                 elif opcode == "JCR": program.extend([0xD, disp4])
                 elif opcode == "JR": program.extend([0xE, disp4])
@@ -225,7 +224,6 @@ class Assembler:
                 if len(args) != 1: raise AssemblerError(f"LDP expects 1 arg (line {line_num+1})")
                 addr = self._parse_val(args[0], labels)
                 if not (0 <= addr <= 255): raise AssemblerError(f"Address out of 8-bit range (line {line_num+1})")
-                # ИСПРАВЛЕНИЕ: LDP генерирует 4 ниббла, увеличиваем pc на 4
                 program.extend([0xF, 0x8, (addr >> 4) & 0x0F, addr & 0x0F])
                 pc += 4
             elif opcode == "BOOT":
@@ -238,6 +236,9 @@ class Assembler:
                 subops = {"JZ": 0xA, "JC": 0xB, "JMP": 0xC, "CAL": 0xD}
                 program.extend([0xF, subops[opcode], (addr >> 4) & 0x0F, addr & 0x0F])
                 pc += 4
+            elif opcode == "HLT":
+                program.extend([0xF, 0xF])
+                pc += 2
 
         return program
 

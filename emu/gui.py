@@ -13,7 +13,7 @@ from panels import HardwarePanel, MemoryPanel
 class GUI(QWidget):
     def __init__(self, cpu: CPU):
         super().__init__()
-        self.setWindowTitle("NC-1 Debug Board v4.4")
+        self.setWindowTitle("NC-1 Debug Board v4.5")
         self.cpu = cpu
         self.assembler = Assembler()
         self.is_running = False
@@ -39,6 +39,12 @@ class GUI(QWidget):
             QPushButton:pressed {
                 border: 2px inset gray;
                 background-color: darkgray;
+            }
+            /* Стили для зажатой кнопки Run */
+            QPushButton#runButton:checked {
+                background-color: red;
+                color: white;
+                border: 2px inset darkred;
             }
             QTabWidget::pane {
                 border-top: 2px solid #8F8F91;
@@ -75,7 +81,6 @@ class GUI(QWidget):
         self.editor = CodeEditor()
         mono_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         self.editor.setFont(mono_font)
-        # Компактный минимальный размер редактора
         self.editor.setMinimumSize(220, 200) 
         editor_layout.addWidget(self.editor)
 
@@ -110,13 +115,18 @@ class GUI(QWidget):
 
         btn_step = QPushButton("Step")
         btn_step.clicked.connect(self.step)
-        btn_run = QPushButton("Run")
-        btn_run.clicked.connect(self.run)
+        
+        # Настройка индикаторной кнопки Run
+        self.btn_run = QPushButton("Run")
+        self.btn_run.setObjectName("runButton") # Уникальный ID для CSS
+        self.btn_run.setCheckable(True)         # Кнопка может быть зажата
+        self.btn_run.clicked.connect(self.run)
+        
         btn_pause = QPushButton("Pause")
         btn_pause.clicked.connect(self.pause)
 
         exec_layout.addWidget(btn_step, 0, 0)
-        exec_layout.addWidget(btn_run, 0, 1)
+        exec_layout.addWidget(self.btn_run, 0, 1)
         exec_layout.addWidget(btn_pause, 0, 2)
 
         btn_reset = QPushButton("Reset")
@@ -137,7 +147,6 @@ class GUI(QWidget):
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Передача callback'а для обновления UI при изменении флагов кликом
         self.hw_panel = HardwarePanel(self.cpu, self.update_ui)
         right_layout.addWidget(self.hw_panel)
 
@@ -147,18 +156,15 @@ class GUI(QWidget):
         main_layout.addWidget(right_panel)
 
     def keyPressEvent(self, event):
-        """Перехват нажатия аппаратной клавиатуры"""
         if event.isAutoRepeat():
             return super().keyPressEvent(event)
         
-        # Блокируем перехват, если пользователь печатает код в редакторе
         if self.editor.hasFocus():
             return super().keyPressEvent(event)
             
         val = self.hw_panel.key_map.get(event.key())
         if val is not None:
             self.cpu.mmu.hardware_inject_key_press(val)
-            # Защита на случай, если кнопка еще не отрисована или удалена
             if val in self.hw_panel.keys:
                 self.hw_panel.keys[val].setDown(True)  
             self.update_ui()
@@ -166,7 +172,6 @@ class GUI(QWidget):
             super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event):
-        """Перехват отпускания аппаратной клавиатуры"""
         if event.isAutoRepeat():
             return super().keyReleaseEvent(event)
             
@@ -238,26 +243,40 @@ class GUI(QWidget):
         if not self.cpu.halted:
             self.cpu.step()
             self.update_ui()
+            # Защита: если шаг привел к HLT, отключаем зажатую кнопку Run
+            if self.cpu.halted and self.is_running:
+                self.pause()
         else:
             QMessageBox.information(self, "Halted", "CPU is halted. Reset to continue.")
 
-    def run(self):
-        if not self.is_running:
-            self.is_running = True
-            delay = self.delay_spin.value()
-            self.timer.start(delay)
+    def run(self, checked=False):
+        """Обрабатывает нажатие на кнопку Run (которая работает как триггер)"""
+        if self.btn_run.isChecked():
+            if self.cpu.halted:
+                self.btn_run.setChecked(False)
+                QMessageBox.information(self, "Halted", "CPU is halted. Reset to continue.")
+            else:
+                self.is_running = True
+                delay = self.delay_spin.value()
+                self.timer.start(delay)
+        else:
+            self.pause()
 
     def run_loop(self):
         if self.is_running and not self.cpu.halted:
             self.cpu.step()
             self.update_ui()
+            # Проверяем HLT сразу после шага, чтобы остановить процесс
+            if self.cpu.halted:
+                self.pause()
         else:
-            self.is_running = False
-            self.timer.stop()
+            self.pause()
 
     def pause(self):
+        """Останавливает процессор и отжимает кнопку Run"""
         self.is_running = False
         self.timer.stop()
+        self.btn_run.setChecked(False)
         self.update_ui()
 
     def reset(self):

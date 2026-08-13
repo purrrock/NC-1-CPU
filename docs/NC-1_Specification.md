@@ -1,6 +1,6 @@
 # NC-1 MICROPROCESSOR TECHNICAL SPECIFICATION
 
-**Version:** 4.4 (Variable-Length ISA & Refactored Core)  
+**Version:** 4.5 (Variable-Length ISA & Refactored Core, added NOP and HLT)  
 **Architecture:** 4-bit RISC / Variable-Length Harvard Architecture  
 **Date:** 2026  
 
@@ -8,7 +8,7 @@
 
 ## 1. General Description
 
-The **NC-1** is a 4-bit microprocessor with an 8-bit addressing space, engineered for embedded systems, hardware emulation, and educational computer architecture projects. Version 4.4 introduces a frequency-optimized **Variable-Length Instruction Set Architecture (ISA)**, frequency-optimized to maximize code density in memory-constrained environments. By encoding high-frequency operations (memory accesses, pointer increments, stack pushes/pops, accumulator arithmetic, and register swaps) into single-nibble (4-bit) opcodes and adding short relative branch instructions, NC-1 v4.4 achieves significantly higher execution speed and up to 40% reduction in code size compared to fixed-width 4-bit architectures.
+The **NC-1** is a 4-bit microprocessor with an 8-bit addressing space, engineered for embedded systems, hardware emulation, and educational computer architecture projects. Version 4.5 refines the frequency-optimized **Variable-Length Instruction Set Architecture (ISA)** to maximize code density in memory-constrained environments. By encoding high-frequency operations (memory accesses, pointer increments, stack pushes/pops, accumulator arithmetic, and register swaps) into single-nibble (4-bit) opcodes and adding short relative branch instructions, NC-1 v4.5 achieves significantly higher execution speed and up to 40% reduction in code size compared to fixed-width 4-bit architectures.
 
 ### Key Features
 * **Frequency-Optimized Variable-Length ISA:** 1-nibble, 2-nibble, 3-nibble, and 4-nibble instruction encodings optimized based on real-world assembly profiling.
@@ -82,7 +82,7 @@ Status flags **Z** (Zero, Bit 0) and **C** (Carry, Bit 1) in the `FL` register a
 
 #### Non-ALU Instruction Flag Preservations:
 * **Immediate, Data Transfer & Pointer Loads (`0 LDI`, `1 LDR`, `2 STR`, `A MOV A,B`, `B MOV B,A`, `F0 MOV Reg`, `F1 XCHG`, `F6 LDRA`, `F8 LDP`):** Preserve existing **Z** and **C** flags.
-* **Control Flow & Bank Logic (`C JZR`, `D JCR`, `E JR`, `F7 XBNK`, `F9 BOOT`, `FA JZ`, `FB JC`, `FC JMP`, `FD CAL`, `FE/FF Reserved`):** Preserve existing **Z** and **C** flags.
+* **Control Flow & Bank Logic (`C JZR`, `D JCR`, `E JR`, `F7 XBNK`, `F9 BOOT`, `FA JZ`, `FB JC`, `FC JMP`, `FD CAL`, `FE Reserved`):** Preserve existing **Z** and **C** flags.
 * **Stack Operations (`3 RET`, `4 PHA`, `5 PLA`):** Preserve existing **Z** and **C** flags.
 * **Direct Register Write (`F0 MOV FL, A`):** Overwrites all 4 bits of `FL` (`Reserved`, `M`, `C`, `Z`) with the value of register `A`.
 
@@ -125,19 +125,19 @@ Unified address space layout across both banks (`0x00`..`0xFF`).
 | **`01` - `DF`** | **Program Space** | User / ROM | Primary program code execution space. |
 | **`E0` - `EF`** | **Hardware Stack** | Hardware / Stack | Dedicated 16-nibble Page-Locked Stack space (`0xE0`..`0xEF`). |
 | **`F0` - `FD`** | **MMIO Ports** | Memory-Mapped I/O | Peripheral device control and registers (see Section 5). |
-| **`FE` - `FF`** | **Reserved** | Reserved / NOP | Unmapped / Reserved addresses (`FE` and `FF` execute as NOP). |
+| **`FE` - `FF`** | **Reserved** | Reserved | Unmapped / Reserved addresses. |
 
 ---
 
-## 4. Instruction Set Architecture (ISA v4.4)
+## 4. Instruction Set Architecture (ISA v4.5)
 
-NC-1 v4.4 implements a variable-length instruction encoding scheme consisting of 1-nibble, 2-nibble, 3-nibble, and 4-nibble instructions.
+NC-1 v4.5 implements a variable-length instruction encoding scheme consisting of 1-nibble, 2-nibble, 3-nibble, and 4-nibble instructions.
 
 ### 4.1. Primary Opcode Table (`0`..`F`)
 
 | Opcode (Hex) | Mnemonic | Arguments | Size (Nibbles) | Operation Description |
 | :---: | :--- | :--- | :---: | :--- |
-| **`0`** | `LDI` | `imm4` | 2 | Load Immediate: `A = imm4` (Note: `00` sequence acts as `NOP`). |
+| **`0`** | `LDI` | `imm4` | 2 | Load Immediate: `A = imm4`. |
 | **`1`** | `LDR` | - | 1 | Load Indirect: `A = ActiveBank[X:Y]`. |
 | **`2`** | `STR` | - | 1 | Store Indirect: `RAM[X:Y] = A` (Shadow write to RAM). |
 | **`3`** | `RET` | - | 1 | Return from Subroutine: `POP PCL`, `POP PCH`. |
@@ -176,8 +176,8 @@ Instructions beginning with Opcode `F` decode the second nibble as a subopcode.
 | **`FB`** | **`JC`** | `F B Hi Lo` | 4 | **Absolute Jump if Carry:** If `C == 1`, `PC = Hi:Lo`. |
 | **`FC`** | **`JMP`** | `F C Hi Lo` | 4 | **Absolute Unconditional Jump:** `PC = Hi:Lo`. |
 | **`FD`** | **`CAL`** | `F D Hi Lo` | 4 | **Call Subroutine:** `PUSH PCH`, `PUSH PCL`, `PC = Hi:Lo`. |
-| **`FE`** | **`Reserved`** | `F E` | 2 | **Reserved / NOP:** Reserved for future hardware extension; executes as `NOP`. |
-| **`FF`** | **`Reserved`** | `F F` | 2 | **Reserved / NOP:** Reserved for future hardware extension; executes as `NOP`. |
+| **`FE`** | **`Reserved`** | `F E` | 2 | **Reserved:** Reserved for future hardware extension. Not recomended use as `NOP`. |
+| **`FF`** | **`HLT`** | `F F` | 2 | **Halt:** Stops CPU clock execution. Prevents invalid execution on uninitialized memory (`0xFF`). |
 
 ---
 
@@ -217,6 +217,13 @@ The `F8` instruction structure is 3 nibbles: `F` `8` `Hi` `Lo`. It loads an 8-bi
 #### E. Software Reset (`F9 BOOT`)
 * **Microoperations:** `PC = 0x00`, `SP = 0xF`, `M = 1`.
 * Immediately transfers execution to `ROM[0x00]` in System Mode. Preserves flags `Z` and `C`.
+
+#### F. No-Operation (NOP) and Padding
+The architecture deliberately omits a dedicated single-byte `NOP` opcode to preserve encoding space. 
+
+* **Recommended NOP:** It is strictly recommended to use the 2-nibble unconditional relative jump **`JR +0` (Opcode `E 0`)** as a standard `NOP` for padding or delay loops.
+  * **Microoperation:** `PC = PC + 0`.
+  * **Why not `FE`?** Using unmapped/reserved opcodes (like `FE`) as pseudo-NOPs is strongly discouraged to avoid critical instruction collisions with future hardware extensions. `JR +0` is architecturally guaranteed to act as a safe `NOP` with zero side effects on registers, flags, or memory.
 
 ---
 
@@ -267,7 +274,7 @@ Peripherals are mapped to addresses `0xF0`..`0xFD` in RAM space. Display registe
 
 ## 6. Execution Model (ROM Monitor / User RAM)
 
-NC-1 v4.4 operates under a hardware-controlled **ROM Monitor / User RAM Execution Cycle**.
+NC-1 v4.5 operates under a hardware-controlled **ROM Monitor / User RAM Execution Cycle**.
 
 ```text
        Hardware Reset
@@ -285,34 +292,43 @@ NC-1 v4.4 operates under a hardware-controlled **ROM Monitor / User RAM Executio
       BOOT Instruction (F9)
              │
              └──────────────► ROM[0x00] (M=1)
-```
+```			 
+Execution Flow:
+Hardware Reset Sequence:
 
-### Execution Flow:
+Assert Reset signal.
 
-1. **Hardware Reset Sequence:**
-   * Assert `Reset` signal.
-   * Internal state reset: `PC = 0x00`, `SP = 0xF`, `M = 1`.
-   * Execution starts at `ROM[0x00]`.
-2. **Nano-Monitor Execution:**
-   * Reads user inputs from keyboard (`0xF4` / `0xF5`) and writes application nibbles into User RAM space (`0x10`..`0xCF`).
-3. **ROM $\rightarrow$ RAM Execution Transfer (Trampoline Pattern):**
-   * Nano-Monitor writes a jump instruction into a temporary RAM address (e.g., `RAM[0x0E] = FC 1 0` -> `JMP 0x10`).
-   * Nano-Monitor aligns `PC` in ROM to execute `XBNK` (`F7`).
-   * Upon `XBNK` execution, `M` becomes `0`. The next instruction is fetched from `RAM[0x0E]` (`JMP 0x10`), smoothly launching user execution in RAM.
-4. **RAM $\rightarrow$ ROM Application Return:**
-   * When the user program completes, it executes `BOOT` (`F9`).
-   * Hardware resets `PC = 0x00`, `SP = 0xF`, `M = 1`, transferring control back to the Nano-Monitor in ROM.
+Internal state reset: PC = 0x00, SP = 0xF, M = 1.
+
+Execution starts at ROM[0x00].
+
+Nano-Monitor Execution:
+
+Reads user inputs from keyboard (0xF4 / 0xF5) and writes application nibbles into User RAM space (0x10..0xCF).
+
+ROM → RAM Execution Transfer (Trampoline Pattern):
+
+Nano-Monitor writes a jump instruction into a temporary RAM address (e.g., RAM[0x0E] = FC 1 0 -> JMP 0x10).
+
+Nano-Monitor aligns PC in ROM to execute XBNK (F7).
+
+Upon XBNK execution, M becomes 0. The next instruction is fetched from RAM[0x0E] (JMP 0x10), smoothly launching user execution in RAM.
+
+RAM → ROM Application Return:
+
+When the user program completes, it executes BOOT (F9).
+
+Hardware resets PC = 0x00, SP = 0xF, M = 1, transferring control back to the Nano-Monitor in ROM.
 
 ---
 
-## Appendix A — Assembly Code Examples
+Appendix A — Assembly Code Examples
 
-### A.1. Memory Block Copy Loop in ISA v4.4
+A.1. Memory Block Copy Loop in ISA v4.5
+Copy a 16-nibble block from ROM (0x80..0x8F) to User RAM (0x20..0x2F) using LDP, LDRA, STR, INX, and JCR:
 
-Copy a 16-nibble block from ROM (`0x80`..`0x8F`) to User RAM (`0x20`..`0x2F`) using `LDP`, `LDRA`, `STR`, `INX`, and `JCR`:
-
-```asm
-; NC-1 v4.4 Optimized Block Copy
+Code snippet
+; NC-1 v4.5 Optimized Block Copy
 ; Source: ROM 0x80, Destination: RAM 0x20, Counter: 16 nibbles
 
 ; 1. Load source pointer X:Y = 0x80 (3 nibbles)
@@ -335,11 +351,9 @@ F 8 2 0         ; LDP 0x20 (X:Y = RAM destination)
 6               ; INX  (X:Y = 0x21, updates Z/C)
 ; ... Loop continues using 2-nibble relative branch JR:
 E F 0           ; JR -16 (Jumps relative -16 nibbles back to COPY_LOOP)
-```
 
-### A.2. Subroutine Context Preservation (`PHA` / `PLA` / `RET`)
-
-```asm
+A.2. Subroutine Context Preservation (PHA / PLA / RET)
+Code snippet
 ; Subroutine preserving Accumulator A across computations
 MATH_SUBROUTINE:
 4               ; PHA (Push A to hardware stack, 1 nibble)
@@ -348,15 +362,12 @@ A               ; MOV A, B
 B               ; MOV B, A
 5               ; PLA (Pop A from hardware stack, 1 nibble)
 3               ; RET (Return to caller, 1 nibble)
-```
 
-### A.3. Application Entry and Monitor Return (`BOOT`)
-
-```asm
+A.3. Application Entry and Monitor Return (BOOT)
+Code snippet
 ; User Program Entry Point in RAM (0x10)
 USER_START:
 F 8 F 0         ; LDP 0xF0 (Set pointer to Display 0 MMIO)
 0 5             ; LDI 5
 2               ; STR (Output 5 to DISP_0)
 F 9             ; BOOT (Software Reset back to Nano-Monitor at ROM[0x00])
-```

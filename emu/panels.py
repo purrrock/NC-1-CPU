@@ -243,7 +243,7 @@ class MemoryPanel(QWidget):
         return tree
 
     def disassemble_current_instruction(self) -> str:
-        """Динамический дизассемблер инструкций переменной длины ISA v4.4."""
+        """Динамический дизассемблер инструкций переменной длины ISA v4.5."""
         regs = self.cpu.regs
         pc = regs.pc
         m_flag = regs.get_flag_m()
@@ -279,8 +279,11 @@ class MemoryPanel(QWidget):
         elif opcode == 0xB:
             return "MOV B, A"
         elif opcode in (0xC, 0xD, 0xE):
-            mnemonics = {0xC: "JZR", 0xD: "JCR", 0xE: "JR"}
             disp4 = read(1)
+            # В v4.5 JR +0 (E 0) - это рекомендованный NOP
+            if opcode == 0xE and disp4 == 0:
+                return "NOP"
+            mnemonics = {0xC: "JZR", 0xD: "JCR", 0xE: "JR"}
             # Перевод 4-битного смещения в знаковое [-8, +7]
             offset = disp4 - 16 if disp4 >= 8 else disp4
             target_addr = (pc + 2 + offset) & 0xFF
@@ -319,8 +322,10 @@ class MemoryPanel(QWidget):
                 h, l = read(2), read(3)
                 target_addr = (h << 4) | l
                 return f"{mnemonics[subop]} 0x{target_addr:02X}"
-            elif subop in (0xE, 0xF):
-                return "NOP"
+            elif subop == 0xE:
+                return "RESERVED"
+            elif subop == 0xF:
+                return "HLT"
 
         return f"UNK 0x{opcode:X}"
 

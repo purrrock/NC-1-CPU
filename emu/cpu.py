@@ -3,7 +3,7 @@ from registers import RegisterFile
 
 class CPU:
     """
-    NC-1 Central Processing Unit (v4.4 Variable-Length ISA).
+    NC-1 Central Processing Unit (v4.5 Variable-Length ISA).
     Combines Register File and MMU. Implements instruction decoding,
     ALU operations, hardware stack, and system calls.
     """
@@ -213,7 +213,7 @@ class CPU:
                 self.regs.set_flag_m(current_m ^ 1)
 
             elif subop == 0x8:
-                # F8 LDP Hi Lo (3 nibbles)
+                # F8 LDP Hi Lo (4 nibbles)
                 addr_h = self.fetch()
                 addr_l = self.fetch()
                 self.regs.x = addr_h
@@ -254,6 +254,10 @@ class CPU:
                 self.push(ret_pc & 0x0F)        # Push PCL
                 self.regs.pc = (addr_h << 4) | addr_l
 
-            elif subop == 0xE or subop == 0xF:
-                # Reserved -> Acts as NOP (2 nibbles)
+            elif subop == 0xE:
+                # FE Reserved (2 nibbles)
                 pass
+
+            elif subop == 0xF:
+                # FF HLT (2 nibbles)
+                self.halted = True
