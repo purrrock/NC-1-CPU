@@ -22,7 +22,7 @@ The **NC-1** is a 4-bit microprocessor with an 8-bit addressing space, engineere
 * **Hardware Return to Monitor (`BOOT`):** Software reset mechanism instantly restoring CPU context to `ROM[0x00]`.
 * **Symmetric Cross-Bank Data Access (`LDRA`):** 2-cycle cross-bank data reading without mode-switching state corruption.
 * **Extended Memory-Mapped I/O (MMIO):** Read/Write display registers, 3-bit General Purpose Input (GPI), and 3-bit General Purpose Output (GPO) integration (`0xF0`..`0xFD`).
-* **Mass Storage Interface (Tape Drive):** Asynchronous 4-phase handshake interface mapped to MMIO for reliable, clock-independent persistent data storage.
+* **Mass Storage Interface:** Interface mapped to MMIO for persistent data storage.
 
 ---
 
@@ -253,7 +253,6 @@ This locks the hardware stack to RAM addresses `0xE0` to `0xEF` (16 nibbles capa
 3. `PCH = Temp_PCH`; `PCL = Temp_PCL` (resumes execution at saved return address).
 
 ---
-
 ## 5. Memory-Mapped I/O Subsystem (MMIO)
 
 Peripherals are mapped to addresses `0xF0`..`0xFD` in RAM space. Display registers `F0`..`F3` and audio/GPO register `F6` support Read/Write (R/W) access.
@@ -268,31 +267,31 @@ Peripherals are mapped to addresses `0xF0`..`0xFD` in RAM space. Display registe
 | **`F5`** | **KBD_CODE**| R | K3 | K2 | K1 | K0 | Key code of pressed button (`0x0`..`0xF`). |
 | **`F6`** | **GPO_AUD** | R/W | `GPO_3` | `GPO_2` | `GPO_1` | `AUD` | **Bit 0:** Speaker toggle (1=On, 0=Off).<br>**Bits 1..3:** General Purpose Output lines. |
 | **`F7`** | **RNG** | R | R3 | R2 | R1 | R0 | Pseudo-random number generator output (`0x0`..`0xF`). |
-| **`F8`** | **TAPE_DAT** | R/W | D3 | D2 | D1 | D0 | Tape drive data buffer (Nibble I/O). |
-| **`F9`** | **TAPE_CMD** | R/W | - | `MOT`/`RDY`| `MOD`/`EOF`| `STR`/`ACK`| Tape drive control and status register (See 5.1). |
+| **`F8`** | **STORAGE_DAT**| R/W | D3 | D2 | D1 | D0 | Synchronous stream data buffer (Auto-incrementing). |
+| **`F9`** | **STORAGE_CMD**| R/W | - | - | `MOD`/`EOF`| `MOT`/`RDY`| Mass storage control and status register (See 5.1). |
 | **`FA`-`FD`**| **Reserved**| - | - | - | - | - | Peripheral expansion bus. |
 | **`FE`-`FF`**| **Reserved**| - | - | - | - | - | Reserved / Unmapped memory addresses. |
 
-### 5.1. Tape Drive Mass Storage Protocol
-The Tape Drive subsystem uses ports `0xF8` (Data) and `0xF9` (Command/Status) to provide clock-independent asynchronous data transfer between the CPU and the storage medium via a 4-phase handshake.
+### 5.1. Synchronous Mass Storage Protocol
+The mass storage subsystem uses ports `0xF8` (Data) and `0xF9` (Command/Status) to provide high-speed, synchronous stream data transfer between the CPU and the storage medium (Emulator File or SPI Flash). Hardware wait-states (Clock Stretching) are handled transparently by the FPGA or emulator, eliminating the need for software handshake loops.
 
 **Port `0xF9` Write (CPU $\rightarrow$ Controller):**
-* **Bit 0 (`STRB`):** Data Strobe. Set to `1` to signal that data in `TAPE_DAT` is ready for writing, or CPU is ready to read the next nibble. Set to `0` to end the handshake cycle.
-* **Bit 1 (`MODE`):** Tape Mode. `1` = Save/Write, `0` = Load/Read.
-* **Bit 2 (`MOTOR`):** Motor Control. `1` = Turn Motor ON (Open file/prepare medium). `0` = Turn Motor OFF (Close and flush file).
+* **Bit 0 (`MOTOR`):** Session Control. `1` = Open session (prompt user or prepare medium). `0` = Close session (flush to disk).
+* **Bit 1 (`MODE`):** Data Direction. `1` = Save/Write to medium, `0` = Load/Read from medium.
 
 **Port `0xF9` Read (Controller $\rightarrow$ CPU):**
-* **Bit 0 (`ACK`):** Acknowledge. `1` = Controller has processed the strobe (data saved or new data loaded). `0` = Controller is idle.
-* **Bit 1 (`EOF`):** End of File. `1` = Reached the end of the tape during Load mode.
-* **Bit 2 (`READY`):** Drive Ready. `1` = Motor is running and the file/medium is successfully opened and ready for I/O.
+* **Bit 0 (`READY`):** Drive Ready. `1` = Session is open and ready for stream I/O. `0` = Session closed or aborted.
+* **Bit 1 (`EOF`):** End of File. `1` = Reached the end of the file during Load mode.
 
-**Hardware Handshake Sequence:**
-1. CPU sets `MOTOR=1`. Polls `READY` until it becomes `1`.
-2. CPU writes nibble to `0xF8`.
-3. CPU sets `STRB=1` (and `MODE=1`).
-4. CPU polls `0xF9` until `ACK=1`.
-5. CPU sets `STRB=0`.
-6. CPU polls `0xF9` until `ACK=0` (Handshake complete).
+**Port `0xF8` Read/Write (Stream Data):**
+* **Write (`STR`):** Instantly appends the nibble to the open file. Hardware auto-increments the internal pointer.
+* **Read (`LDR`):** Instantly fetches the next nibble from the file. Hardware auto-increments the internal pointer.
+
+**Synchronous I/O Sequence:**
+1. CPU sets `MOTOR=1` and `MODE=x`. Polls `READY` until it becomes `1`.
+2. CPU executes a loop of consecutive `STR` or `LDR` instructions to `0xF8` to stream the data.
+3. CPU sets `MOTOR=0` to close the file.
+
 ---
 
 ## 6. Execution Model (ROM Monitor / User RAM)
@@ -395,45 +394,55 @@ F 8 F 0         ; LDP 0xF0 (Set pointer to Display 0 MMIO)
 2               ; STR (Output 5 to DISP_0)
 F 9             ; BOOT (Software Reset back to Nano-Monitor at ROM[0x00])
 
-### A.4. Tape Drive I/O (Handshake Example)
+### A.4. Synchronous Storage I/O (Writing Data)
 
-Subroutine to safely write a single nibble to the tape drive using the 4-phase handshake protocol. Assumes the Tape Motor is already turned ON and READY.
+Thanks to the synchronous stream interface, writing a block of data to storage requires no software handshakes or delays. Wait states are handled transparently by the hardware.
 
 ```asm
-; Input: Register A contains the nibble to save.
-; Modifies: X, Y (MMIO Pointers). Preserves A.
-TAPE_WRITE:
-    4           ; PHA         (Push data nibble to hardware stack)
+; NC-1 v4.5 Synchronous Storage Write Example
+; Writes nibbles 0x0 through 0xF to the storage drive
+
+ORG 0x00
+INIT_STORAGE:
+    ; 1. Open File for Writing (MOTOR=1, MODE=1 -> 0b0011 = 3)
+    LDP 0xF9     
+    LDI 0x3      
+    STR          
+
+    ; 2. Wait for READY == 1 (Bit 0)
+    LDI 0x1
+    MOV B, A     
+WAIT_READY:
+    LDR
+    AND B
+    JZR WAIT_READY 
+
+    ; 3. Initialize Loop Counter
+    LDI 0x0      
+    PHA          
+
+WRITE_LOOP:
+    ; 4. Stream Write (Instant Hardware Execution)
+    LDP 0xF8     
+    PLA          ; A = Current Value
+    PHA          ; Save back to stack
+    STR          ; Write to Disk (Hardware handles timing transparently)
+
+    ; 5. Increment and loop
+    PLA
+    INC A
+    PHA
+    JCR CLOSE_FILE ; If C=1 (wrapped from F to 0), we are done
+    JMP WRITE_LOOP
+
+CLOSE_FILE:
+    PLA          ; Clean up stack
     
-    ; 1. Write Data
-    F 8 F 8     ; LDP 0xF8    (X:Y = 0xF8 TAPE_DAT)
-    5           ; PLA         (Restore data to A)
-    4           ; PHA         (Push back to preserve for caller)
-    2           ; STR         (MMIO[0xF8] = A)
-
-    ; 2. Assert Strobe & Mode (Write)
-    F 8 F 9     ; LDP 0xF9    (X:Y = 0xF9 TAPE_CMD)
-    0 7         ; LDI 7       (A = 0b0111: MOTOR=1, MODE=1, STRB=1)
-    2           ; STR         (MMIO[0xF9] = 7)
-
-    ; 3. Wait for ACK == 1
-    0 1         ; LDI 1       (A = 1, Mask for ACK bit)
-    B           ; MOV B, A    (B = 1)
-WAIT_ACK1:
-    1           ; LDR         (A = MMIO[0xF9])
-    F 4         ; AND B       (A = A & 1)
-    C B         ; JZR -5      (Jump Relative -5 to WAIT_ACK1 if Z=1)
-
-    ; 4. De-assert Strobe
-    0 6         ; LDI 6       (A = 0b0110: MOTOR=1, MODE=1, STRB=0)
-    2           ; STR         (MMIO[0xF9] = 6)
-
-    ; 5. Wait for ACK == 0
-WAIT_ACK0:
-    1           ; LDR         (A = MMIO[0xF9])
-    F 4         ; AND B       (A = A & 1)
-    F 3         ; SUB B       (Check if ACK is 1)
-    C B         ; JZR -5      (Jump Relative -5 to WAIT_ACK0 if Z=1)
+    ; 6. Close file (MOTOR=0)
+    LDP 0xF9
+    LDI 0x0
+    STR
     
-    5           ; PLA         (Clean up stack, restore original A)
-    3           ; RET         (Return to caller)
+HALT_END:
+    FF           ; HLT (Opcode 0xFF) - safely halt execution
+```

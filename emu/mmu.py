@@ -1,18 +1,15 @@
 import random
 
-class TapeDrive:
-    """Контроллер ленточного накопителя (Mass Storage Interface)"""
+class StorageDrive:
+    """Контроллер потокового накопителя (Synchronous Mass Storage)"""
     def __init__(self):
-        self.data_reg = 0
-        self.cmd_reg = 0
-        self.ack = 0
         self.eof = 0
         self.ready = 0
         self.motor_on = False
         self.file_buffer = bytearray()
         self.filename = None
         
-        # Состояние режима (0=Read, 1=Write), зафиксированное при включении мотора
+        # Состояние режима (0=Read, 1=Write), зафиксированное при открытии сессии
         self.active_mode = 0 
 
         # Коллбэки для GUI
@@ -20,15 +17,14 @@ class TapeDrive:
         self.on_motor_on_write = None
 
     def write_cmd(self, val):
-        self.cmd_reg = val & 0xF
-        strb = self.cmd_reg & 0b0001
-        mode = (self.cmd_reg & 0b0010) >> 1
-        motor = (self.cmd_reg & 0b0100) >> 2
+        val &= 0xF
+        motor = val & 0b0001        # Bit 0
+        mode = (val & 0b0010) >> 1  # Bit 1
 
-        # 1. ОБРАБОТКА МОТОРА (Открытие / Закрытие файла)
+        # Открытие / Закрытие сессии (Мотор)
         if motor == 1 and not self.motor_on:
             self.motor_on = True
-            self.active_mode = mode  # Фиксируем режим на весь сеанс работы магнитофона
+            self.active_mode = mode
             
             if self.active_mode == 1:
                 # Включили мотор на ЗАПИСЬ
@@ -37,9 +33,10 @@ class TapeDrive:
                 
                 if self.filename:
                     self.file_buffer = bytearray()
-                    self.ready = 1 # Магнитофон готов к приему данных
+                    self.ready = 1 
+                    self.eof = 0
                 else:
-                    self.motor_on = False # Отмена выбора файла
+                    self.motor_on = False 
             else:
                 # Включили мотор на ЧТЕНИЕ
                 if self.on_motor_on_read:
@@ -51,41 +48,39 @@ class TapeDrive:
                     self.ready = 1
                     self.eof = 0
                 else:
-                    self.motor_on = False # Отмена выбора файла
+                    self.motor_on = False
 
         elif motor == 0 and self.motor_on:
-            # ВЫКЛЮЧИЛИ МОТОР (Остановка и сохранение)
+            # Остановка и сброс на диск
             self.motor_on = False
             self.ready = 0
             
-            # Используем зафиксированный active_mode, так как бит mode в 
-            # отключающей команде может быть любым (чаще всего 0)
             if self.active_mode == 1 and self.filename:
-                # Сбрасываем буфер на диск
                 with open(self.filename, 'wb') as f:
                     f.write(self.file_buffer)
                 self.filename = None
 
-        # 2. ОБРАБОТКА ДАННЫХ (Handshake) только если мотор включен
-        if self.ready == 1:
-            if strb == 1 and self.ack == 0:
-                if self.active_mode == 1:
-                    # Сохраняем ниббл в буфер
-                    self.file_buffer.append(self.data_reg & 0x0F)
-                else:
-                    # Читаем ниббл из буфера (если не конец файла)
-                    if len(self.file_buffer) > 0:
-                        self.data_reg = self.file_buffer.pop(0) & 0x0F
-                    else:
-                        self.eof = 1
-                self.ack = 1 # Сигнал процессору: операция выполнена
-                
-            elif strb == 0 and self.ack == 1:
-                self.ack = 0 # Сброс ACK вслед за сбросом STRB
-
     def read_cmd(self):
-        # Формируем байт статуса для CPU
-        return (self.ready << 2) | (self.eof << 1) | self.ack
+        # Bit 1 = EOF, Bit 0 = READY
+        return (self.eof << 1) | self.ready
+
+    def write_data(self, val):
+        # Hardware Streaming Write: Мгновенное добавление в буфер
+        if self.ready == 1 and self.active_mode == 1:
+            self.file_buffer.append(val & 0x0F)
+
+    def read_data(self):
+        # Hardware Streaming Read: Мгновенное чтение из буфера
+        if self.ready == 1 and self.active_mode == 0:
+            if len(self.file_buffer) > 0:
+                val = self.file_buffer.pop(0) & 0x0F
+                if len(self.file_buffer) == 0:
+                    self.eof = 1
+                return val
+            else:
+                self.eof = 1
+                return 0
+        return 0
 
 
 class MMU:
@@ -104,8 +99,8 @@ class MMU:
         self.kbd_code = 0             # F5
         self.audio = 0                # F6 (GPO_AUD)
         
-        # Интеграция ленточного накопителя
-        self.tape_drive = TapeDrive()
+        # Интеграция накопителя
+        self.storage_drive = StorageDrive()
 
         self.rng_func = lambda: random.randint(0, 15)
         
@@ -145,9 +140,9 @@ class MMU:
         elif address == 0xF7:
             return self.rng_func() & 0x0F
         elif address == 0xF8:
-            return self.tape_drive.data_reg
+            return self.storage_drive.read_data()
         elif address == 0xF9:
-            return self.tape_drive.read_cmd()
+            return self.storage_drive.read_cmd()
         return 0
 
     def _mmio_write(self, address: int, value: int):
@@ -162,19 +157,19 @@ class MMU:
                 self.audio_callback(new_audio_state)
             self.audio = value
         elif address == 0xF8:
-            self.tape_drive.data_reg = value
+            self.storage_drive.write_data(value)
         elif address == 0xF9:
-            self.tape_drive.write_cmd(value)
+            self.storage_drive.write_cmd(value)
 
     def load_rom(self, program: list[int]):
         if len(program) > 240:
-            raise ValueError(f"Program size ({len(program)} nibbles) exceeds available ROM space (max 240 nibbles before MMIO space).")
+            raise ValueError(f"Program size ({len(program)} nibbles) exceeds available ROM space.")
         for i, val in enumerate(program):
             self.rom[i] = val & 0x0F
 
     def load_ram(self, program: list[int]):
         if len(program) > 224:
-            raise ValueError(f"Program size ({len(program)} nibbles) exceeds available RAM space (max 224 nibbles before Stack/MMIO space).")
+            raise ValueError(f"Program size ({len(program)} nibbles) exceeds available RAM space.")
         for i, val in enumerate(program):
             self.ram[i] = val & 0x0F
 
@@ -198,10 +193,10 @@ class MMU:
         self.audio = 0
         
         # Сохраняем коллбэки при сбросе
-        read_cb = self.tape_drive.on_motor_on_read
-        write_cb = self.tape_drive.on_motor_on_write
+        read_cb = self.storage_drive.on_motor_on_read
+        write_cb = self.storage_drive.on_motor_on_write
         
-        self.tape_drive = TapeDrive()
+        self.storage_drive = StorageDrive()
         
-        self.tape_drive.on_motor_on_read = read_cb
-        self.tape_drive.on_motor_on_write = write_cb
+        self.storage_drive.on_motor_on_read = read_cb
+        self.storage_drive.on_motor_on_write = write_cb

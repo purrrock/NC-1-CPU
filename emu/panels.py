@@ -15,7 +15,6 @@ class HardwarePanel(QWidget):
         self.mmio_labels = []
         self.keys = {}
         
-        # Маппинг клавиш физической клавиатуры на Hex-значения (0-F)
         self.key_map = {
             Qt.Key.Key_0: 0x0, Qt.Key.Key_1: 0x1, Qt.Key.Key_2: 0x2, Qt.Key.Key_3: 0x3,
             Qt.Key.Key_4: 0x4, Qt.Key.Key_5: 0x5, Qt.Key.Key_6: 0x6, Qt.Key.Key_7: 0x7,
@@ -30,11 +29,9 @@ class HardwarePanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
         
-        # Верхняя секция: Слева (Регистры + Флаги), Справа (Матричная клавиатура)
         top_hw_layout = QHBoxLayout()
         top_hw_layout.setSpacing(6)
 
-        # Левый столбец: Регистры сверху, Флаги снизу
         left_top_vbox = QVBoxLayout()
         left_top_vbox.setContentsMargins(0, 0, 0, 0)
         left_top_vbox.setSpacing(4)
@@ -64,25 +61,22 @@ class HardwarePanel(QWidget):
             reg_layout.addWidget(lbl_val, row, col + 1)
             self.reg_labels[reg] = lbl_val
 
-        # Индикатор AUDIO (F6) внутри блока регистров
-        lbl_audio = QLabel("AUDIO:")
+        lbl_audio = QLabel("AUD:")
         self.audio_led = QLabel()
         self.audio_led.setFixedSize(12, 12)
         self.audio_led.setStyleSheet("background-color: gray; border-radius: 6px;")
         reg_layout.addWidget(lbl_audio, 1, 6, alignment=Qt.AlignmentFlag.AlignRight)
         reg_layout.addWidget(self.audio_led, 1, 7, alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
-        # Индикатор TAPE (F8-F9) под AUDIO
-        lbl_tape = QLabel("TAPE:")
-        self.tape_led = QLabel()
-        self.tape_led.setFixedSize(12, 12)
-        self.tape_led.setStyleSheet("background-color: gray; border-radius: 6px;")
-        reg_layout.addWidget(lbl_tape, 2, 6, alignment=Qt.AlignmentFlag.AlignRight)
-        reg_layout.addWidget(self.tape_led, 2, 7, alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        lbl_stor = QLabel("STOR:")
+        self.stor_led = QLabel()
+        self.stor_led.setFixedSize(12, 12)
+        self.stor_led.setStyleSheet("background-color: gray; border-radius: 6px;")
+        reg_layout.addWidget(lbl_stor, 2, 6, alignment=Qt.AlignmentFlag.AlignRight)
+        reg_layout.addWidget(self.stor_led, 2, 7, alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         
         left_top_vbox.addWidget(reg_group)
 
-        # Панель флагов
         flags_group = QGroupBox("Flags")
         flags_layout = QHBoxLayout(flags_group)
         flags_layout.setContentsMargins(6, 4, 6, 4)
@@ -102,7 +96,6 @@ class HardwarePanel(QWidget):
         left_top_vbox.addWidget(flags_group)
         top_hw_layout.addLayout(left_top_vbox)
 
-        # Клавиатура Keypad (F4-F5) в правом верхнем углу
         keypad_group = QGroupBox("Keypad (F4-F5)")
         keypad_layout = QGridLayout(keypad_group)
         keypad_layout.setContentsMargins(6, 6, 6, 6)
@@ -121,8 +114,6 @@ class HardwarePanel(QWidget):
         top_hw_layout.addWidget(keypad_group)
         layout.addLayout(top_hw_layout)
 
-        # 7-сегментные дисплеи MMIO (F3-F0)
-        # Динамическое определение пути к assets/Segment7Standard.otf
         font_path = os.path.join(os.path.dirname(__file__), "assets", "Segment7Standard.otf")
         if not os.path.exists(font_path):
             font_path = os.path.join("assets", "Segment7Standard.otf")
@@ -192,8 +183,8 @@ class HardwarePanel(QWidget):
         audio_color = "red" if self.cpu.mmu.audio else "gray"
         self.audio_led.setStyleSheet(f"background-color: {audio_color}; border-radius: 6px;")
 
-        tape_color = "red" if self.cpu.mmu.tape_drive.motor_on else "gray"
-        self.tape_led.setStyleSheet(f"background-color: {tape_color}; border-radius: 6px;")
+        stor_color = "red" if self.cpu.mmu.storage_drive.motor_on else "gray"
+        self.stor_led.setStyleSheet(f"background-color: {stor_color}; border-radius: 6px;")
 
 
 class MemoryPanel(QWidget):
@@ -254,7 +245,6 @@ class MemoryPanel(QWidget):
         return tree
 
     def disassemble_current_instruction(self) -> str:
-        """Динамический дизассемблер инструкций переменной длины ISA v4.5."""
         regs = self.cpu.regs
         pc = regs.pc
         m_flag = regs.get_flag_m()
@@ -263,7 +253,6 @@ class MemoryPanel(QWidget):
 
         opcode = read(0)
 
-        # --- Базовые инструкции (0..E) ---
         if opcode == 0x0:
             imm = read(1)
             return f"LDI 0x{imm:X}"
@@ -291,16 +280,13 @@ class MemoryPanel(QWidget):
             return "MOV B, A"
         elif opcode in (0xC, 0xD, 0xE):
             disp4 = read(1)
-            # В v4.5 JR +0 (E 0) - это рекомендованный NOP
             if opcode == 0xE and disp4 == 0:
                 return "NOP"
             mnemonics = {0xC: "JZR", 0xD: "JCR", 0xE: "JR"}
-            # Перевод 4-битного смещения в знаковое [-8, +7]
             offset = disp4 - 16 if disp4 >= 8 else disp4
             target_addr = (pc + 2 + offset) & 0xFF
             return f"{mnemonics[opcode]} 0x{target_addr:02X}"
 
-        # --- Расширенные инструкции (Префикс F) ---
         elif opcode == 0xF:
             subop = read(1)
             if subop == 0x0:

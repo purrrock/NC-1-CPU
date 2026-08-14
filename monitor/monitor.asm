@@ -1,161 +1,171 @@
 ORG 0x00
 ENTRY:
-    ; Единая точка входа для Reset (M=1, R=1) и BOOT (M=1, PC=0)
-    JMP MON_INIT
+    JMP WAIT_CMD        ; [0x00..0x03] Вектор аппаратного сброса
+
+CLOSE_FILE:
+    ; Размещение в "мертвой зоне" ПЗУ
+    LDP 0xF9            ; [0x04..0x07] Указатель на STORAGE_CMD
+    LDI 0x0             ; [0x08..0x09]
+    STR                 ; [0x0A] MOTOR = 0 (Безопасное закрытие и сброс буферов на флеш/диск)
+    BOOT                ; [0x0B..0x0C] Аппаратный возврат в монитор
 
 ORG 0x0E
 RUN_XBNK:
-    ; Trampoline pattern: переключение банков (ROM -> RAM)
-    ; Следующая выборка инструкции произойдет из RAM[0x10]
-    XBNK
+    XBNK                ; [0x0E..0x0F] Трамплин переключения банков памяти
 
 ORG 0x10
-MON_INIT:
-    ; DISP_0 = 0x0 (Command Mode)
-    LDP 0xF0
-    LDI 0x0
-    STR
-
 WAIT_CMD:
-    ; Ожидание команды оператора
     CAL GETKEY
-    LDI 0xA
-    SUB B
-    JZ LOAD
-    LDI 0xB
-    SUB B
-    JZ RUN
-    JMP WAIT_CMD
-
-LOAD:
-    ; DISP_0 = 0xA (LOAD Mode)
+    
+    ; Эхо нажатой команды на DISP_0
     LDP 0xF0
-    LDI 0xA
+    MOV A, B
     STR
     
-    ; Инициализация PCH:PCL адресом 0x10
+    ; Парсинг команд
+    LDI 0xB
+    SUB B
+    JZ RUN_XBNK         ; B -> Абсолютный прыжок на трамплин
+    
+    LDI 0xA
+    SUB B
+    JZ LOAD_INIT        ; A -> Абсолютный прыжок на загрузку
+    
+    LDI 0xD
+    SUB B
+    JZR DUMP_INIT       ; D -> Короткий прыжок (смещение +2)
+    
+    BOOT                ; Любая другая кнопка -> программный сброс
+
+DUMP_INIT:
+    ; Инициализация записи на внешний носитель
+    LDP 0xF9
+    LDI 0x3             ; MOTOR=1 (бит 0), MODE=1 (Write, бит 1) -> 0x3
+    STR
+    
+    LDI 0x1             ; Маска бита 0 (READY)
+    MOV B, A
+WAIT_RDY:
+    LDR
+    AND B
+    JZR WAIT_RDY        ; Ожидание готовности накопителя (READY=1)
+    
+    ; Проваливаемся в LOAD_INIT (Fall-through)
+
+LOAD_INIT:
+    ; Инициализация целевого адреса 0x10
     LDP 0xF3
     LDI 0x1
-    STR             ; DISP_3 = 1
-    DEX
+    STR                 ; PCH = 1
+    DEX                 ; X:Y = 0xF2
     LDI 0x0
-    STR             ; DISP_2 = 0
+    STR                 ; PCL = 0
 
 LOAD_LOOP:
-    ; Динамическая индикация памяти на DISP_1
     CAL SET_PTR
-    LDP 0xF1
-    STR
+    LDP 0xF1            
+    STR                 ; Отрисовка RAM[X:Y] на DISP_1
     
     CAL GETKEY
     LDI 0xF
     SUB B
-    JZ ESCAPE
+    JZ ESCAPE           ; Если нажат F, уходим в автомат
 
 WRITE_B:
     CAL SET_PTR
-    MOV A,B         ; Восстановление кода клавиши в A
-    STR
-    CAL ADVANCE
-    JMP LOAD_LOOP
-
-ESCAPE:
-    ; Ожидание подтверждающего символа (0 или F)
-    CAL GETKEY
+    MOV A, B
+    STR                 ; 1. Запись в User RAM
     
-    ; Проверка на F0 (выход)
-    LDI 0x0
-    SUB B
-    JZ MON_INIT
-    
-    ; Проверка на FF (литерал F)
-    LDI 0xF
-    SUB B
-    JZ WRITE_B      ; Абсолютный прыжок на штатную процедуру записи (B = 0xF)
-    
-    ; Обработка невалидной комбинации (например, FC)
-    ; Сброс escape-состояния: возвращаемся в цикл ввода без записи и сдвига адреса
-    JMP LOAD_LOOP
-
-RUN:
-    ; DISP_0 = 0xB (RUN Mode)
-    LDP 0xF0
-    LDI 0xB
-    STR
-    ; Прыжок на трамплин
-    JMP RUN_XBNK
-
-SET_PTR:
-    ; Настройка X:Y из дисплейных регистров без разрушения указателя
-    LDP 0xF3
+    ; 2. Проверка аппаратного состояния мотора флеш-контроллера
+    PHA                 ; Спасаем введенный код B в стек
+    LDP 0xF9            ; Указатель на STORAGE_CMD
+    LDI 0x1
+    MOV B, A            ; B = 1 (маска READY - сессия активна)
     LDR
-    PHA             ; ИСПРАВЛЕНИЕ: Сохранение PCH в стек (не в X)
-    DEX             ; X:Y корректно смещается на 0xF2
-    LDR
-    MOV Y,A         ; Y = PCL
-    PLA             ; Извлечение PCH
-    MOV X,A         ; X = PCH
-    LDRA            ; A = RAM[X:Y] (Кросс-чтение)
-    RET
-
-ADVANCE:
-    ; Инкремент PCL
+    AND B
+    SUB B               ; Если READY=1, то 1 - 1 = 0 (Z=1)
+    JZ IS_ECHO          ; Абсолютный прыжок к записи потока
+    
+    PLA                 ; Если сессия закрыта: восстанавливаем баланс стека
+ADV_LOOP:
+    ; Инкремент младшего адреса
     LDP 0xF2
     LDR
-    INC A           ; Строго обновляет Z и C (ISA v4.4)
+    INC A
     STR
-    JCR ADV_HIGH    ; 2-ниббловый относительный переход при C=1 (+1 ниббл)
-    RET
+    JCR ADV_HIGH        ; Короткий переход при переполнении (+4 ниббла)
+    JMP LOAD_LOOP       ; Возврат в начало цикла ввода
 
 ADV_HIGH:
-    ; Инкремент PCH
-    INX             ; X:Y = 0xF3
+    ; Инкремент старшего адреса
+    INX                 ; X:Y = 0xF3
     LDR
     INC A
     STR
     
-    ; Защита аппаратного стека (0xE0)
-    MOV B,A
+    ; Защита аппаратного стека от затирания
+    MOV B, A
     LDI 0xE
     SUB B
-    JZ MON_INIT
+    JZ CLOSE_FILE       ; Если PCH == 0xE, экстренно закрываем файл
+    JMP LOAD_LOOP
+
+IS_ECHO:
+    ; ЭКСТРЕМАЛЬНАЯ ОПТИМИЗАЦИЯ v4.5: Указатель X:Y уже на 0xF9! 
+    DEX                 ; X:Y = 0xF8 (STORAGE_DAT)
+    PLA                 ; Извлекаем введенный ниббл из стека обратно в A
+    STR                 ; Синхронная запись! Аппаратура сама инкрементирует адрес на флешке.
+    JMP ADV_LOOP        ; Возврат к инкременту адреса RAM
+
+ESCAPE:
+    CAL GETKEY
+    LDI 0x0
+    SUB B
+    JZ CLOSE_FILE       ; Ввод F0 -> закрыть файл и выйти
+    JMP WRITE_B         ; Ввод FX -> записать X в память
+
+SET_PTR:
+    ; Безопасное формирование X:Y без затирания регистров
+    LDP 0xF3
+    LDR
+    PHA
+    DEX
+    LDR
+    MOV Y, A
+    PLA
+    MOV X, A
+    LDRA
     RET
 
 GETKEY:
-    ; Инициализация указателя и маски
     LDP 0xF4
     LDI 0x1
-    MOV B,A         ; B = 1
-    
-WAIT_PRESS:
-    LDR             ; Чтение GPI_KBD
+    MOV B, A
+WAIT_P:
+    LDR
     AND B
-    JZR WAIT_PRESS  ; Относительный прыжок (-5 нибблов), ждем 1
+    JZR WAIT_P          ; Ожидание нажатия
     
-    ; Чтение защелкнутого кода клавиши (KBD_CODE)
     INX
     LDR
     PHA
     
-    ; Оверлей нажатия на DISP_1
+    ; Визуальный оверлей нажатия на DISP_1
     DEX
     DEX
     DEX
-    DEX             ; X:Y = 0xF1
-    STR
+    DEX
+    STR                 
     
-    ; Возврат к порту статуса (0xF4)
     INX
     INX
     INX
-    
-WAIT_RELEASE:
+WAIT_R:
     LDR
     AND B
-    SUB B           ; ИСПРАВЛЕНИЕ: Вычитание маски (1 - 1 = 0 -> Z=1)
-    JZR WAIT_RELEASE; Относительный прыжок (-7 нибблов), ждем 0
+    SUB B
+    JZR WAIT_R          ; Ожидание отпускания
     
-    ; Извлечение кода клавиши и возврат
     PLA
-    MOV B,A
+    MOV B, A
     RET

@@ -21,40 +21,35 @@ class GUI(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.run_loop)
 
-        # Привязка коллбэков файловой системы для магнитофона
-        self.cpu.mmu.tape_drive.on_motor_on_read = self.handle_tape_read
-        self.cpu.mmu.tape_drive.on_motor_on_write = self.handle_tape_write
+        self.cpu.mmu.storage_drive.on_motor_on_read = self.handle_storage_read
+        self.cpu.mmu.storage_drive.on_motor_on_write = self.handle_storage_write
 
         self.setup_ui()
         self.update_ui()
         
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-    # --- Коллбэки ленточного накопителя ---
-    def handle_tape_read(self):
-        """Вызывается когда процессор устанавливает MOTOR=1, MODE=0 (Чтение)"""
+    def handle_storage_read(self):
         was_running = self.is_running
         if was_running:
-            self.timer.stop() # Ставим таймер на паузу, пока открыт диалог
+            self.timer.stop() 
 
-        filename, _ = QFileDialog.getOpenFileName(self, "Load from Tape", "", "Tape Files (*.bin);;All Files (*.*)")
+        filename, _ = QFileDialog.getOpenFileName(self, "Load from Storage", "", "Data Files (*.bin);;All Files (*.*)")
         
         if was_running:
-            self.timer.start() # Возобновляем таймер
+            self.timer.start() 
         return filename
 
-    def handle_tape_write(self):
-        """Вызывается когда процессор устанавливает MOTOR=1, MODE=1 (Запись)"""
+    def handle_storage_write(self):
         was_running = self.is_running
         if was_running:
             self.timer.stop()
 
-        filename, _ = QFileDialog.getSaveFileName(self, "Save to Tape", "", "Tape Files (*.bin);;All Files (*.*)")
+        filename, _ = QFileDialog.getSaveFileName(self, "Save to Storage", "", "Data Files (*.bin);;All Files (*.*)")
         
         if was_running:
             self.timer.start()
         return filename
-    # --------------------------------------
 
     def setup_ui(self):
         main_layout = QHBoxLayout(self)
@@ -148,13 +143,9 @@ class GUI(QWidget):
         self.btn_run.setObjectName("runButton")
         self.btn_run.setCheckable(True)
         self.btn_run.clicked.connect(self.run)
-        
-        btn_pause = QPushButton("Pause")
-        btn_pause.clicked.connect(self.pause)
 
         exec_layout.addWidget(btn_step, 0, 0)
-        exec_layout.addWidget(self.btn_run, 0, 1)
-        exec_layout.addWidget(btn_pause, 0, 2)
+        exec_layout.addWidget(self.btn_run, 0, 1, 1, 2)
 
         btn_reset = QPushButton("Reset")
         btn_reset.clicked.connect(self.reset)
@@ -305,7 +296,6 @@ class GUI(QWidget):
     def reset(self):
         self.pause()
         self.cpu.reset()
-        # Повторно привязываем коллбэки ленты, так как reset() в MMU пересоздает объект TapeDrive
-        self.cpu.mmu.tape_drive.on_motor_on_read = self.handle_tape_read
-        self.cpu.mmu.tape_drive.on_motor_on_write = self.handle_tape_write
+        self.cpu.mmu.storage_drive.on_motor_on_read = self.handle_storage_read
+        self.cpu.mmu.storage_drive.on_motor_on_write = self.handle_storage_write
         self.update_ui()
