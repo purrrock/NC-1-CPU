@@ -71,6 +71,14 @@ class HardwarePanel(QWidget):
         self.audio_led.setStyleSheet("background-color: gray; border-radius: 6px;")
         reg_layout.addWidget(lbl_audio, 1, 6, alignment=Qt.AlignmentFlag.AlignRight)
         reg_layout.addWidget(self.audio_led, 1, 7, alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        # Индикатор TAPE (F8-F9) под AUDIO
+        lbl_tape = QLabel("TAPE:")
+        self.tape_led = QLabel()
+        self.tape_led.setFixedSize(12, 12)
+        self.tape_led.setStyleSheet("background-color: gray; border-radius: 6px;")
+        reg_layout.addWidget(lbl_tape, 2, 6, alignment=Qt.AlignmentFlag.AlignRight)
+        reg_layout.addWidget(self.tape_led, 2, 7, alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         
         left_top_vbox.addWidget(reg_group)
 
@@ -183,6 +191,9 @@ class HardwarePanel(QWidget):
 
         audio_color = "red" if self.cpu.mmu.audio else "gray"
         self.audio_led.setStyleSheet(f"background-color: {audio_color}; border-radius: 6px;")
+
+        tape_color = "red" if self.cpu.mmu.tape_drive.motor_on else "gray"
+        self.tape_led.setStyleSheet(f"background-color: {tape_color}; border-radius: 6px;")
 
 
 class MemoryPanel(QWidget):

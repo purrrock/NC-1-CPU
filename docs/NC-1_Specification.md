@@ -22,6 +22,7 @@ The **NC-1** is a 4-bit microprocessor with an 8-bit addressing space, engineere
 * **Hardware Return to Monitor (`BOOT`):** Software reset mechanism instantly restoring CPU context to `ROM[0x00]`.
 * **Symmetric Cross-Bank Data Access (`LDRA`):** 2-cycle cross-bank data reading without mode-switching state corruption.
 * **Extended Memory-Mapped I/O (MMIO):** Read/Write display registers, 3-bit General Purpose Input (GPI), and 3-bit General Purpose Output (GPO) integration (`0xF0`..`0xFD`).
+* **Mass Storage Interface (Tape Drive):** Asynchronous 4-phase handshake interface mapped to MMIO for reliable, clock-independent persistent data storage.
 
 ---
 
@@ -267,9 +268,31 @@ Peripherals are mapped to addresses `0xF0`..`0xFD` in RAM space. Display registe
 | **`F5`** | **KBD_CODE**| R | K3 | K2 | K1 | K0 | Key code of pressed button (`0x0`..`0xF`). |
 | **`F6`** | **GPO_AUD** | R/W | `GPO_3` | `GPO_2` | `GPO_1` | `AUD` | **Bit 0:** Speaker toggle (1=On, 0=Off).<br>**Bits 1..3:** General Purpose Output lines. |
 | **`F7`** | **RNG** | R | R3 | R2 | R1 | R0 | Pseudo-random number generator output (`0x0`..`0xF`). |
-| **`F8`-`FD`**| **Reserved**| - | - | - | - | - | Peripheral expansion bus. |
+| **`F8`** | **TAPE_DAT** | R/W | D3 | D2 | D1 | D0 | Tape drive data buffer (Nibble I/O). |
+| **`F9`** | **TAPE_CMD** | R/W | - | `MOT`/`RDY`| `MOD`/`EOF`| `STR`/`ACK`| Tape drive control and status register (See 5.1). |
+| **`FA`-`FD`**| **Reserved**| - | - | - | - | - | Peripheral expansion bus. |
 | **`FE`-`FF`**| **Reserved**| - | - | - | - | - | Reserved / Unmapped memory addresses. |
 
+### 5.1. Tape Drive Mass Storage Protocol
+The Tape Drive subsystem uses ports `0xF8` (Data) and `0xF9` (Command/Status) to provide clock-independent asynchronous data transfer between the CPU and the storage medium via a 4-phase handshake.
+
+**Port `0xF9` Write (CPU $\rightarrow$ Controller):**
+* **Bit 0 (`STRB`):** Data Strobe. Set to `1` to signal that data in `TAPE_DAT` is ready for writing, or CPU is ready to read the next nibble. Set to `0` to end the handshake cycle.
+* **Bit 1 (`MODE`):** Tape Mode. `1` = Save/Write, `0` = Load/Read.
+* **Bit 2 (`MOTOR`):** Motor Control. `1` = Turn Motor ON (Open file/prepare medium). `0` = Turn Motor OFF (Close and flush file).
+
+**Port `0xF9` Read (Controller $\rightarrow$ CPU):**
+* **Bit 0 (`ACK`):** Acknowledge. `1` = Controller has processed the strobe (data saved or new data loaded). `0` = Controller is idle.
+* **Bit 1 (`EOF`):** End of File. `1` = Reached the end of the tape during Load mode.
+* **Bit 2 (`READY`):** Drive Ready. `1` = Motor is running and the file/medium is successfully opened and ready for I/O.
+
+**Hardware Handshake Sequence:**
+1. CPU sets `MOTOR=1`. Polls `READY` until it becomes `1`.
+2. CPU writes nibble to `0xF8`.
+3. CPU sets `STRB=1` (and `MODE=1`).
+4. CPU polls `0xF9` until `ACK=1`.
+5. CPU sets `STRB=0`.
+6. CPU polls `0xF9` until `ACK=0` (Handshake complete).
 ---
 
 ## 6. Execution Model (ROM Monitor / User RAM)
@@ -322,9 +345,9 @@ Hardware resets PC = 0x00, SP = 0xF, M = 1, transferring control back to the Nan
 
 ---
 
-Appendix A — Assembly Code Examples
+## Appendix A — Assembly Code Examples
 
-A.1. Memory Block Copy Loop in ISA v4.5
+### A.1. Memory Block Copy Loop in ISA v4.5
 Copy a 16-nibble block from ROM (0x80..0x8F) to User RAM (0x20..0x2F) using LDP, LDRA, STR, INX, and JCR:
 
 Code snippet
@@ -352,7 +375,7 @@ F 8 2 0         ; LDP 0x20 (X:Y = RAM destination)
 ; ... Loop continues using 2-nibble relative branch JR:
 E F 0           ; JR -16 (Jumps relative -16 nibbles back to COPY_LOOP)
 
-A.2. Subroutine Context Preservation (PHA / PLA / RET)
+### A.2. Subroutine Context Preservation (PHA / PLA / RET)
 Code snippet
 ; Subroutine preserving Accumulator A across computations
 MATH_SUBROUTINE:
@@ -363,7 +386,7 @@ B               ; MOV B, A
 5               ; PLA (Pop A from hardware stack, 1 nibble)
 3               ; RET (Return to caller, 1 nibble)
 
-A.3. Application Entry and Monitor Return (BOOT)
+### A.3. Application Entry and Monitor Return (BOOT)
 Code snippet
 ; User Program Entry Point in RAM (0x10)
 USER_START:
@@ -371,3 +394,46 @@ F 8 F 0         ; LDP 0xF0 (Set pointer to Display 0 MMIO)
 0 5             ; LDI 5
 2               ; STR (Output 5 to DISP_0)
 F 9             ; BOOT (Software Reset back to Nano-Monitor at ROM[0x00])
+
+### A.4. Tape Drive I/O (Handshake Example)
+
+Subroutine to safely write a single nibble to the tape drive using the 4-phase handshake protocol. Assumes the Tape Motor is already turned ON and READY.
+
+```asm
+; Input: Register A contains the nibble to save.
+; Modifies: X, Y (MMIO Pointers). Preserves A.
+TAPE_WRITE:
+    4           ; PHA         (Push data nibble to hardware stack)
+    
+    ; 1. Write Data
+    F 8 F 8     ; LDP 0xF8    (X:Y = 0xF8 TAPE_DAT)
+    5           ; PLA         (Restore data to A)
+    4           ; PHA         (Push back to preserve for caller)
+    2           ; STR         (MMIO[0xF8] = A)
+
+    ; 2. Assert Strobe & Mode (Write)
+    F 8 F 9     ; LDP 0xF9    (X:Y = 0xF9 TAPE_CMD)
+    0 7         ; LDI 7       (A = 0b0111: MOTOR=1, MODE=1, STRB=1)
+    2           ; STR         (MMIO[0xF9] = 7)
+
+    ; 3. Wait for ACK == 1
+    0 1         ; LDI 1       (A = 1, Mask for ACK bit)
+    B           ; MOV B, A    (B = 1)
+WAIT_ACK1:
+    1           ; LDR         (A = MMIO[0xF9])
+    F 4         ; AND B       (A = A & 1)
+    C B         ; JZR -5      (Jump Relative -5 to WAIT_ACK1 if Z=1)
+
+    ; 4. De-assert Strobe
+    0 6         ; LDI 6       (A = 0b0110: MOTOR=1, MODE=1, STRB=0)
+    2           ; STR         (MMIO[0xF9] = 6)
+
+    ; 5. Wait for ACK == 0
+WAIT_ACK0:
+    1           ; LDR         (A = MMIO[0xF9])
+    F 4         ; AND B       (A = A & 1)
+    F 3         ; SUB B       (Check if ACK is 1)
+    C B         ; JZR -5      (Jump Relative -5 to WAIT_ACK0 if Z=1)
+    
+    5           ; PLA         (Clean up stack, restore original A)
+    3           ; RET         (Return to caller)

@@ -21,11 +21,40 @@ class GUI(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.run_loop)
 
+        # Привязка коллбэков файловой системы для магнитофона
+        self.cpu.mmu.tape_drive.on_motor_on_read = self.handle_tape_read
+        self.cpu.mmu.tape_drive.on_motor_on_write = self.handle_tape_write
+
         self.setup_ui()
         self.update_ui()
         
-        # Разрешаем окну перехватывать глобальный фокус ввода
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    # --- Коллбэки ленточного накопителя ---
+    def handle_tape_read(self):
+        """Вызывается когда процессор устанавливает MOTOR=1, MODE=0 (Чтение)"""
+        was_running = self.is_running
+        if was_running:
+            self.timer.stop() # Ставим таймер на паузу, пока открыт диалог
+
+        filename, _ = QFileDialog.getOpenFileName(self, "Load from Tape", "", "Tape Files (*.bin);;All Files (*.*)")
+        
+        if was_running:
+            self.timer.start() # Возобновляем таймер
+        return filename
+
+    def handle_tape_write(self):
+        """Вызывается когда процессор устанавливает MOTOR=1, MODE=1 (Запись)"""
+        was_running = self.is_running
+        if was_running:
+            self.timer.stop()
+
+        filename, _ = QFileDialog.getSaveFileName(self, "Save to Tape", "", "Tape Files (*.bin);;All Files (*.*)")
+        
+        if was_running:
+            self.timer.start()
+        return filename
+    # --------------------------------------
 
     def setup_ui(self):
         main_layout = QHBoxLayout(self)
@@ -40,7 +69,6 @@ class GUI(QWidget):
                 border: 2px inset gray;
                 background-color: darkgray;
             }
-            /* Стили для зажатой кнопки Run */
             QPushButton#runButton:checked {
                 background-color: red;
                 color: white;
@@ -116,10 +144,9 @@ class GUI(QWidget):
         btn_step = QPushButton("Step")
         btn_step.clicked.connect(self.step)
         
-        # Настройка индикаторной кнопки Run
         self.btn_run = QPushButton("Run")
-        self.btn_run.setObjectName("runButton") # Уникальный ID для CSS
-        self.btn_run.setCheckable(True)         # Кнопка может быть зажата
+        self.btn_run.setObjectName("runButton")
+        self.btn_run.setCheckable(True)
         self.btn_run.clicked.connect(self.run)
         
         btn_pause = QPushButton("Pause")
@@ -243,14 +270,12 @@ class GUI(QWidget):
         if not self.cpu.halted:
             self.cpu.step()
             self.update_ui()
-            # Защита: если шаг привел к HLT, отключаем зажатую кнопку Run
             if self.cpu.halted and self.is_running:
                 self.pause()
         else:
             QMessageBox.information(self, "Halted", "CPU is halted. Reset to continue.")
 
     def run(self, checked=False):
-        """Обрабатывает нажатие на кнопку Run (которая работает как триггер)"""
         if self.btn_run.isChecked():
             if self.cpu.halted:
                 self.btn_run.setChecked(False)
@@ -266,14 +291,12 @@ class GUI(QWidget):
         if self.is_running and not self.cpu.halted:
             self.cpu.step()
             self.update_ui()
-            # Проверяем HLT сразу после шага, чтобы остановить процесс
             if self.cpu.halted:
                 self.pause()
         else:
             self.pause()
 
     def pause(self):
-        """Останавливает процессор и отжимает кнопку Run"""
         self.is_running = False
         self.timer.stop()
         self.btn_run.setChecked(False)
@@ -282,4 +305,7 @@ class GUI(QWidget):
     def reset(self):
         self.pause()
         self.cpu.reset()
+        # Повторно привязываем коллбэки ленты, так как reset() в MMU пересоздает объект TapeDrive
+        self.cpu.mmu.tape_drive.on_motor_on_read = self.handle_tape_read
+        self.cpu.mmu.tape_drive.on_motor_on_write = self.handle_tape_write
         self.update_ui()
