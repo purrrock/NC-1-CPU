@@ -11,8 +11,11 @@ class TapeDrive:
         self.motor_on = False
         self.file_buffer = bytearray()
         self.filename = None
+        
+        # Состояние режима (0=Read, 1=Write), зафиксированное при включении мотора
+        self.active_mode = 0 
 
-        # Коллбэки для GUI (чтобы mmu не зависел от PyQt6 напрямую)
+        # Коллбэки для GUI
         self.on_motor_on_read = None
         self.on_motor_on_write = None
 
@@ -25,7 +28,9 @@ class TapeDrive:
         # 1. ОБРАБОТКА МОТОРА (Открытие / Закрытие файла)
         if motor == 1 and not self.motor_on:
             self.motor_on = True
-            if mode == 1:
+            self.active_mode = mode  # Фиксируем режим на весь сеанс работы магнитофона
+            
+            if self.active_mode == 1:
                 # Включили мотор на ЗАПИСЬ
                 if self.on_motor_on_write:
                     self.filename = self.on_motor_on_write()
@@ -52,7 +57,10 @@ class TapeDrive:
             # ВЫКЛЮЧИЛИ МОТОР (Остановка и сохранение)
             self.motor_on = False
             self.ready = 0
-            if mode == 1 and self.filename:
+            
+            # Используем зафиксированный active_mode, так как бит mode в 
+            # отключающей команде может быть любым (чаще всего 0)
+            if self.active_mode == 1 and self.filename:
                 # Сбрасываем буфер на диск
                 with open(self.filename, 'wb') as f:
                     f.write(self.file_buffer)
@@ -61,7 +69,7 @@ class TapeDrive:
         # 2. ОБРАБОТКА ДАННЫХ (Handshake) только если мотор включен
         if self.ready == 1:
             if strb == 1 and self.ack == 0:
-                if mode == 1:
+                if self.active_mode == 1:
                     # Сохраняем ниббл в буфер
                     self.file_buffer.append(self.data_reg & 0x0F)
                 else:
@@ -188,4 +196,12 @@ class MMU:
         self.kbd_stat = 0
         self.kbd_code = 0
         self.audio = 0
-        self.tape_drive = TapeDrive() # Сброс состояния накопителя
+        
+        # Сохраняем коллбэки при сбросе
+        read_cb = self.tape_drive.on_motor_on_read
+        write_cb = self.tape_drive.on_motor_on_write
+        
+        self.tape_drive = TapeDrive()
+        
+        self.tape_drive.on_motor_on_read = read_cb
+        self.tape_drive.on_motor_on_write = write_cb
