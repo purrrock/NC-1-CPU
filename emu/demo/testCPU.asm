@@ -73,7 +73,7 @@ SUB_TEST:
 ORG 0xC0
 SUCCESS:
     LDP 0xF0     ; X:Y = 0xF0 (DISP_0)
-    LDI 0xF      ; A = 0xF (Исправлено с F)
+    LDI 0xF      ; A = 0xF
     STR          ; Выводим 'F' на индикатор
 HALT_OK:
     JMP HALT_OK  ; Бесконечный цикл
@@ -81,7 +81,7 @@ HALT_OK:
 ORG 0xE0
 ERROR:
     LDP 0xF3     ; X:Y = 0xF3 (DISP_3)
-    LDI 0xE      ; A = 0xE (Исправлено с E)
+    LDI 0xE      ; A = 0xE
     STR          ; Выводим 'E' на индикатор
 HALT_ERR:
     JMP HALT_ERR ; Бесконечный цикл
