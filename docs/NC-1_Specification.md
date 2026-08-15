@@ -100,9 +100,10 @@ The CPU addresses a 256-nibble window (`0x00`..`0xFF`), mapped dynamically depen
 ---
 
 ### 3.2. Memory Access & Shadow Write
-* **Write Operations (`STR`, `PHA`, `CAL`):** All memory write operations are unconditionally routed to **RAM** (User Bank) regardless of the state of flag **M** ("Shadow Write"). This allows ROM routines to write data into RAM without toggling execution banks.
-* **Read Operations (`LDR` vs `LDRA`):** The target memory bank for data reads is evaluated using hardware XOR logic:
 
+* **Write Operations (`STR`, `PHA`, `CAL`):** All memory write operations are unconditionally routed to **RAM** (User Bank) regardless of the state of flag **M** ("Shadow Write"). This allows ROM routines to write data into RAM without toggling execution banks.
+* **Stack Space Code Execution (ROM Overlap):** Because all stack-related read and write operations (`PHA`, `PLA`, `CAL`, `RET`) are physically routed to the RAM bank, the corresponding address range in the System Bank (`ROM[0xE0..0xEF]`) is isolated from stack bus conflicts. Executable system code, jump tables, or constants can safely reside in this ROM region while the CPU concurrently manipulates the hardware stack in the identical RAM address window.
+* **Read Operations (`LDR` vs `LDRA`):** The target memory bank for data reads is evaluated using hardware XOR logic:
 $$\text{Target\_Bank\_Read} = M \oplus \text{Is\_SYS\_6}$$
 
 where `Is_SYS_6` is `1` during execution of `F6` (`LDRA`), and `0` during standard `1` (`LDR`) operations.
@@ -124,7 +125,7 @@ Unified address space layout across both banks (`0x00`..`0xFF`).
 | :---: | :---: | :---: | :--- |
 | **`00`** | **Reset Entry** | Hardware | Entry point upon Hardware Reset (`PC=0x00`, `SP=0xF`, `M=1`). |
 | **`01` - `DF`** | **Program Space** | User / ROM | Primary program code execution space. |
-| **`E0` - `EF`** | **Hardware Stack** | Hardware / Stack | Dedicated 16-nibble Page-Locked Stack space (`0xE0`..`0xEF`). |
+| **`E0` - `EF`** | **Hardware Stack / ROM Code Space** | Hardware / Stack (RAM) / Read-Only (ROM) | Dedicated 16-nibble Page-Locked Stack space in RAM (`0xE0`..`0xEF`). The identical address range in ROM (`ROM[0xE0..0xEF]`) can safely store executable system code due to independent hardware routing. |
 | **`F0` - `FD`** | **MMIO Ports** | Memory-Mapped I/O | Peripheral device control and registers (see Section 5). |
 | **`FE` - `FF`** | **Reserved** | Reserved | Unmapped / Reserved addresses. |
 
@@ -182,7 +183,15 @@ Instructions beginning with Opcode `F` decode the second nibble as a subopcode.
 
 ---
 
-### 4.3. Detailed Instruction Semantics
+### 4.3. Subroutine Call and Hardware Stack Mechanics
+
+Subroutine control flow in NC-1 uses the **Page-Locked Hardware Stack**. The physical 4-bit Stack Pointer (`SP`, Register ID `100`b) is combined with a hardcoded high nibble `0xE` (`1110`b).
+
+This locks the hardware stack to RAM addresses `0xE0` to `0xEF` (16 nibbles capacity, supporting up to 8 nested `CAL` calls or combined data pushes).
+
+* **Hardware Memory Routing:** All stack operations (`CAL`, `RET`, `PHA`, `PLA`) route strictly to **RAM** regardless of execution mode **M**. This architectural decoupling guarantees that the execution of instructions fetched from `ROM[0xE0..0xEF]` will never collide with hardware stack manipulations.
+* **Stack Wrap-around:** `SP` wraps modulo 16 (`0x0 - 1 = 0xF`; `0xF + 1 = 0x0`). Stack overflow/underflow wraps smoothly without hardware exceptions.
+* **Stack Reset:** Hardware Reset or `BOOT` sets `SP = 0xF` (initial top of stack = `0xEF`).
 
 #### A. Relative Branching (`JZR`, `JCR`, `JR`)
 Relative jump instructions use a 4-bit 2's complement displacement (`disp4`) encoded in the second nibble. The displacement represents a signed integer offset in the range `[-8, +7]`.
