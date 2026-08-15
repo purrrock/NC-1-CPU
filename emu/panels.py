@@ -248,7 +248,11 @@ class MemoryPanel(QWidget):
         regs = self.cpu.regs
         pc = regs.pc
         m_flag = regs.get_flag_m()
-        read = lambda offset: self.cpu.mmu.read((pc + offset) & 0xFF, m_flag)
+        
+        # Передача is_debug=True гарантирует, что предвыборка инструкций 
+        # для дизассемблера не вызовет побочных эффектов в портах MMIO
+        read = lambda offset: self.cpu.mmu.read((pc + offset) & 0xFF, m_flag, is_debug=True)
+        
         REG_MAP = {0: "A", 1: "B", 2: "X", 3: "Y", 4: "SP", 5: "FL", 6: "PCH", 7: "PCL"}
 
         opcode = read(0)
@@ -330,7 +334,10 @@ class MemoryPanel(QWidget):
         for r in range(16):
             for c in range(16):
                 idx = r * 16 + c
-                val = self.cpu.mmu.read(idx, bank_flag)
+                
+                # Безопасное чтение дампа памяти для отрисовки GUI
+                val = self.cpu.mmu.read(idx, bank_flag, is_debug=True)
+                
                 val_str = f"{val:X}"
                 is_highlighted = (idx == highlight_pc)
                 if is_highlighted:

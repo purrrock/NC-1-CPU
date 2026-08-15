@@ -58,7 +58,9 @@ class StorageDrive:
             if self.active_mode == 1 and self.filename:
                 with open(self.filename, 'wb') as f:
                     f.write(self.file_buffer)
-                self.filename = None
+            
+            # Сброс имени файла должен происходить независимо от режима
+            self.filename = None
 
     def read_cmd(self):
         # Bit 1 = EOF, Bit 0 = READY
@@ -69,10 +71,14 @@ class StorageDrive:
         if self.ready == 1 and self.active_mode == 1:
             self.file_buffer.append(val & 0x0F)
 
-    def read_data(self):
-        # Hardware Streaming Read: Мгновенное чтение из буфера
+    def read_data(self, is_debug=False):
+        # Hardware Streaming Read с защитой от побочных эффектов GUI
         if self.ready == 1 and self.active_mode == 0:
             if len(self.file_buffer) > 0:
+                if is_debug:
+                    # Безопасное чтение для DataGrid без сдвига указателя
+                    return self.file_buffer[0] & 0x0F
+                
                 val = self.file_buffer.pop(0) & 0x0F
                 if len(self.file_buffer) == 0:
                     self.eof = 1
@@ -108,17 +114,22 @@ class MMU:
         self.audio_callback = None
         self.display_callback = None
 
-    def read(self, address: int, bank_flag: int) -> int:
+    def read(self, address: int, m_flag: int, is_debug: bool = False) -> int:
+        """
+        Reads a nibble from memory or MMIO.
+        Active memory bank depends on the M flag:
+        1 = System (ROM)
+        0 = User (RAM)
+        is_debug: Флаг безопасного чтения для GUI (предотвращает сдвиг указателя накопителя)
+        """
         address &= 0xFF
-
         if address >= 0xF0:
-            return self._mmio_read(address)
-
-        if bank_flag == 1:
+            return self._mmio_read(address, is_debug)
+        if m_flag == 1:
             return self.rom[address]
         else:
             return self.ram[address]
-
+ 
     def write(self, address: int, value: int):
         address &= 0xFF
         value &= 0x0F
@@ -128,7 +139,7 @@ class MMU:
         else:
             self.ram[address] = value
 
-    def _mmio_read(self, address: int) -> int:
+    def _mmio_read(self, address: int, is_debug: bool = False) -> int:
         if 0xF0 <= address <= 0xF3:
             return self.displays[address - 0xF0]
         elif address == 0xF4:
@@ -140,7 +151,7 @@ class MMU:
         elif address == 0xF7:
             return self.rng_func() & 0x0F
         elif address == 0xF8:
-            return self.storage_drive.read_data()
+            return self.storage_drive.read_data(is_debug)
         elif address == 0xF9:
             return self.storage_drive.read_cmd()
         return 0

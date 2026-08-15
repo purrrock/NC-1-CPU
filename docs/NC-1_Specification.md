@@ -1,6 +1,6 @@
 # NC-1 MICROPROCESSOR TECHNICAL SPECIFICATION
 
-**Version:** 4.5 (Variable-Length ISA & Refactored Core, added NOP and HLT)  
+**Version:** 4.5 (Variable-Length ISA)  
 **Architecture:** 4-bit RISC / Variable-Length Harvard Architecture  
 **Date:** 2026  
 
