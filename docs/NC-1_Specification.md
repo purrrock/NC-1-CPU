@@ -264,24 +264,67 @@ This locks the hardware stack to RAM addresses `0xE0` to `0xEF` (16 nibbles capa
 ---
 ## 5. Memory-Mapped I/O Subsystem (MMIO)
 
-Peripherals are mapped to addresses `0xF0`..`0xFD` in RAM space. Display registers `F0`..`F3` and audio/GPO register `F6` support Read/Write (R/W) access.
+Peripherals are mapped to addresses `0xF0`..`0xFD` in RAM space. Display registers `F0`..`F3`, audio/GPO register `F6`, and the hardware countdown timer at `FA` support Read/Write (R/W) access.
 
 | Address | Name | Access | Bit 3 | Bit 2 | Bit 1 | Bit 0 | Description & Hardware Function |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
-| **`F0`** | **DISP_0** | R/W | D3 | D2 | D1 | D0 | Rightmost 7-segment display (Hex digit `0`..`F`). |
-| **`F1`** | **DISP_1** | R/W | D3 | D2 | D1 | D0 | Display digit 1. |
-| **`F2`** | **DISP_2** | R/W | D3 | D2 | D1 | D0 | Display digit 2. |
-| **`F3`** | **DISP_3** | R/W | D3 | D2 | D1 | D0 | Leftmost 7-segment display (Hex digit `0`..`F`). |
-| **`F4`** | **GPI_KBD**| R | `GPI_3` | `GPI_2` | `GPI_1` | `KBD` | **Bit 0:** Key status (1=Pressed, 0=Released).<br>**Bits 1..3:** General Purpose Input lines. |
-| **`F5`** | **KBD_CODE**| R | K3 | K2 | K1 | K0 | Key code of pressed button (`0x0`..`0xF`). |
-| **`F6`** | **GPO_AUD** | R/W | `GPO_3` | `GPO_2` | `GPO_1` | `AUD` | **Bit 0:** Speaker toggle (1=On, 0=Off).<br>**Bits 1..3:** General Purpose Output lines. |
-| **`F7`** | **RNG** | R | R3 | R2 | R1 | R0 | Pseudo-random number generator output (`0x0`..`0xF`). |
-| **`F8`** | **STORAGE_DAT**| R/W | D3 | D2 | D1 | D0 | Synchronous stream data buffer (Auto-incrementing). |
-| **`F9`** | **STORAGE_CMD**| R/W | - | - | `MOD`/`EOF`| `MOT`/`RDY`| Mass storage control and status register (See 5.1). |
-| **`FA`-`FD`**| **Reserved**| - | - | - | - | - | Peripheral expansion bus. |
-| **`FE`-`FF`**| **Reserved**| - | - | - | - | - | Reserved / Unmapped memory addresses. |
+| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| **`F0`** | **`DISP_0`** | R/W | D3 | D2 | D1 | D0 | Rightmost 7-segment display (Hex digit `0`..`F`). |
+| **`F1`** | **`DISP_1`** | R/W | D3 | D2 | D1 | D0 | Display digit 1. |
+| **`F2`** | **`DISP_2`** | R/W | D3 | D2 | D1 | D0 | Display digit 2. |
+| **`F3`** | **`DISP_3`** | R/W | D3 | D2 | D1 | D0 | Leftmost 7-segment display (Hex digit `0`..`F`). |
+| **`F4`** | **`GPI_KBD`** | R | `GPI_3` | `GPI_2` | `GPI_1` | `KBD` | **Bit 0:** Key status (`1` = Pressed, `0` = Released). **Bits 1..3:** General Purpose Input lines. |
+| **`F5`** | **`KBD_CODE`** | R | K3 | K2 | K1 | K0 | Key code of pressed button (`0x0`..`0xF`). |
+| **`F6`** | **`GPO_AUD`** | R/W | `GPO_3` | `GPO_2` | `GPO_1` | `AUD` | **Bit 0:** Speaker toggle (`1` = On, `0` = Off). **Bits 1..3:** General Purpose Output lines. |
+| **`F7`** | **`RNG`** | R | R3 | R2 | R1 | R0 | Pseudo-random number generator output (`0x0`..`0xF`). |
+| **`F8`** | **`STORAGE_DAT`** | R/W | D3 | D2 | D1 | D0 | Synchronous stream data buffer (Auto-incrementing). |
+| **`F9`** | **`STORAGE_CMD`** | R/W | - | - | `MOD`/`EOF` | `MOT`/`RDY` | Mass storage control and status register (See 5.1). |
+| **`FA`** | **`TIMER`** | R/W | T3 | T2 | T1 | T0 | 4-bit hardware countdown timer. **Write:** loads the timer with value `0x0`..`0xF` and starts/restarts the countdown. **Read:** returns the current timer value. The timer decrements once every **250 ms (4 Hz)** and stops automatically at `0x0`. |
+| **`FB`-`FD`** | **Reserved** | - | - | - | - | - | Peripheral expansion bus. |
+| **`FE`-`FF`** | **Reserved** | - | - | - | - | - | Reserved / Unmapped memory addresses. |
 
-### 5.1. Synchronous Mass Storage Protocol
+### 5.1. Hardware Countdown Timer
+
+The `TIMER` peripheral at address `0xFA` provides a simple hardware-controlled delay mechanism independent of CPU instruction execution speed.
+
+**Timer operation:**
+
+1. Writing a 4-bit value `N` to `0xFA` loads the countdown register with `N` and starts the timer.
+2. The timer decrements automatically at a fixed rate of **4 counts per second**, corresponding to one decrement every **250 ms**.
+3. When the counter reaches `0x0`, the timer stops and remains at `0x0`.
+4. Writing a new value while the timer is running immediately replaces the current value and restarts the countdown from the new value.
+5. Reading `0xFA` returns the current 4-bit countdown value.
+6. The timer is clocked by an independent hardware timebase and **must not depend on CPU instruction execution frequency**.
+
+**Timing range:**
+
+| Loaded Value | Approximate Delay |
+| :---: | :---: |
+| `0x0` | 0 s |
+| `0x1` | 0.25 s |
+| `0x2` | 0.50 s |
+| `0x4` | 1.00 s |
+| `0x8` | 2.00 s |
+| `0xC` | 3.00 s |
+| `0xF` | 3.75 s |
+
+The timer is intended primarily for simple delays, animation timing, game loops, input debouncing, and other applications where timing must remain independent of the physical CPU implementation or emulator execution speed.
+
+**Example:**
+```
+; Подпрограмма ожидания таймера (блокирующая)
+; Предполагается, что нужное значение уже записано в 0xFA
+WAIT_TIMER:
+    LDP 0xFA        ; Установить X:Y = 0xFA
+POLL:
+    LDR             ; Считать значение таймера в A
+    DEC A           ; Если таймер = 0, A станет 0xF и установится C=1
+    JCR DONE       ; Если C=1 (достигнут нуль) -> выход
+    JR POLL        ; Иначе -> повторить опрос
+DONE:
+    RET
+```
+
+### 5.2. Synchronous Mass Storage Protocol
 The mass storage subsystem uses ports `0xF8` (Data) and `0xF9` (Command/Status) to provide high-speed, synchronous stream data transfer between the CPU and the storage medium (Emulator File or SPI Flash). Hardware wait-states (Clock Stretching) are handled transparently by the FPGA or emulator, eliminating the need for software handshake loops.
 
 **Port `0xF9` Write (CPU $\rightarrow$ Controller):**

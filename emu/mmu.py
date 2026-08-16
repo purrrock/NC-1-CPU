@@ -1,4 +1,5 @@
 import random
+import time
 
 class StorageDrive:
     """Контроллер потокового накопителя (Synchronous Mass Storage)"""
@@ -105,6 +106,10 @@ class MMU:
         self.kbd_code = 0             # F5
         self.audio = 0                # F6 (GPO_AUD)
         
+        # Hardware Timer State (FA)
+        self.timer_value = 0
+        self.timer_last_tick = time.time()
+        
         # Интеграция накопителя
         self.storage_drive = StorageDrive()
 
@@ -120,7 +125,7 @@ class MMU:
         Active memory bank depends on the M flag:
         1 = System (ROM)
         0 = User (RAM)
-        is_debug: Флаг безопасного чтения для GUI (предотвращает сдвиг указателя накопителя)
+        is_debug: Флаг безопасного чтения для GUI (предотвращает побочные эффекты)
         """
         address &= 0xFF
         if address >= 0xF0:
@@ -154,6 +159,26 @@ class MMU:
             return self.storage_drive.read_data(is_debug)
         elif address == 0xF9:
             return self.storage_drive.read_cmd()
+        elif address == 0xFA:
+            # Ленивое вычисление состояния таймера
+            if self.timer_value > 0 and not is_debug:
+                current_time = time.time()
+                elapsed = current_time - self.timer_last_tick
+                
+                # Таймер отсчитывает 4 такта в секунду (250 мс на квант)
+                ticks_passed = int(elapsed / 0.25)
+                
+                if ticks_passed > 0:
+                    self.timer_value -= ticks_passed
+                    if self.timer_value < 0:
+                        self.timer_value = 0
+                    
+                    # Сдвигаем метку времени на количество полных прошедших квантов,
+                    # сохраняя дробный остаток для предотвращения рассинхронизации (дрейфа таймера)
+                    self.timer_last_tick += (ticks_passed * 0.25)
+                    
+            return self.timer_value & 0x0F
+            
         return 0
 
     def _mmio_write(self, address: int, value: int):
@@ -171,6 +196,10 @@ class MMU:
             self.storage_drive.write_data(value)
         elif address == 0xF9:
             self.storage_drive.write_cmd(value)
+        elif address == 0xFA:
+            # Непосредственная запись переопределяет текущее значение и сбрасывает базу времени
+            self.timer_value = value & 0x0F
+            self.timer_last_tick = time.time()
 
     def load_rom(self, program: list[int]):
         if len(program) > 240:
@@ -202,6 +231,10 @@ class MMU:
         self.kbd_stat = 0
         self.kbd_code = 0
         self.audio = 0
+        
+        # Сброс аппаратного таймера
+        self.timer_value = 0
+        self.timer_last_tick = time.time()
         
         # Сохраняем коллбэки при сбросе
         read_cb = self.storage_drive.on_motor_on_read
