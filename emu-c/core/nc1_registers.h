@@ -7,7 +7,7 @@
 /*
  * NC-1 Register File
  *
- * В архитектуре NC-1 восемь 4-битных регистров:
+ * The NC-1 architecture has eight 4-bit registers:
  *
  *   0: A
  *   1: B
@@ -18,17 +18,16 @@
  *   6: PCH
  *   7: PCL
  *
- * В C регистры хранятся в uint8_t, однако их архитектурное
- * значение ограничено младшими четырьмя битами.
+ * Registers are stored in uint8_t, but only the low nibble is
+ * architecturally significant.
  */
 
-#define NC1_REGISTER_COUNT  8
-#define NC1_NIBBLE_MASK     0x0F
-#define NC1_BYTE_MASK       0xFF
+#define NC1_REGISTER_COUNT 8u
+#define NC1_NIBBLE_MASK    0x0Fu
 
 
 /* --------------------------------------------------------------------------
- * Register IDs
+ * Register identifiers
  * -------------------------------------------------------------------------- */
 
 typedef enum
@@ -46,7 +45,7 @@ typedef enum
 
 
 /* --------------------------------------------------------------------------
- * Flag masks
+ * FL bit assignments
  * -------------------------------------------------------------------------- */
 
 /*
@@ -54,14 +53,14 @@ typedef enum
  *
  *   bit 0 = Z — Zero
  *   bit 1 = C — Carry
- *   bit 2 = M — Execution Bank
+ *   bit 2 = M — Memory bank
  *   bit 3 = R — Reserved
  */
 
-#define NC1_FLAG_Z  0x01
-#define NC1_FLAG_C  0x02
-#define NC1_FLAG_M  0x04
-#define NC1_FLAG_R  0x08
+#define NC1_FLAG_Z 0x01u
+#define NC1_FLAG_C 0x02u
+#define NC1_FLAG_M 0x04u
+#define NC1_FLAG_R 0x08u
 
 
 /* --------------------------------------------------------------------------
@@ -69,14 +68,11 @@ typedef enum
  * -------------------------------------------------------------------------- */
 
 /*
- * В Python RegisterFile запись PCL может вызвать callback
- * on_pcl_write().
+ * Called after PCL is written.
  *
- * Callback нужен, в частности, для сохранения семантики текущего
- * Python-эмулятора, где изменение PCL может инициировать действие
- * внешнего компонента.
- *
- * Пока callback не получает дополнительных аргументов.
+ * The callback is used by the CPU core to reproduce the behavior of the
+ * Python implementation, where a direct PCL write marks that a jump
+ * occurred during the current instruction cycle.
  */
 typedef void (*nc1_pcl_write_callback_t)(void *context);
 
@@ -88,24 +84,22 @@ typedef void (*nc1_pcl_write_callback_t)(void *context);
 typedef struct
 {
     /*
-     * Восемь архитектурных 4-битных регистров.
+     * Eight architectural 4-bit registers.
      *
-     * Каждый элемент хранится в uint8_t, но функции записи
-     * обеспечивают маскирование до младшего nibble.
+     * Stored as uint8_t because C has no native 4-bit integer type.
+     * Register-writing functions enforce the 0x0F mask.
      */
     uint8_t regs[NC1_REGISTER_COUNT];
 
     /*
-     * Вызывается после записи PCL.
-     *
-     * Может быть NULL.
+     * Optional callback invoked after PCL is written.
      */
     nc1_pcl_write_callback_t on_pcl_write;
 
     /*
-     * Произвольный контекст callback.
+     * Opaque user-defined callback context.
      *
-     * Register File не знает, кто именно обрабатывает событие.
+     * The Register File does not need to know what owns the callback.
      */
     void *callback_context;
 
@@ -117,28 +111,28 @@ typedef struct
  * -------------------------------------------------------------------------- */
 
 /*
- * Инициализация Register File.
+ * Reset the register file.
  *
- * Поведение соответствует RegisterFile.reset() в Python:
+ * According to the current Python implementation:
  *
- *   все регистры = 0
+ *   all registers = 0
  *   SP = 0x0F
- *   M = 1
+ *   M  = 1
  */
 void nc1_registers_reset(nc1_register_file_t *rf);
 
 
 /* --------------------------------------------------------------------------
- * Individual register access
+ * Generic register access
  * -------------------------------------------------------------------------- */
 
 /*
- * Прямое чтение регистра.
+ * Read a register by register ID.
  *
- * Значение возвращается в диапазоне 0..15.
+ * The register ID is limited to 3 bits.
  *
- * Для FL функция эквивалентна Python read():
- * bit 3 (Reserved) в результате не возвращается.
+ * For FL, this function reproduces RegisterFile.read():
+ * only bits Z/C/M (bits 0..2) are returned.
  */
 uint8_t nc1_register_read(
     const nc1_register_file_t *rf,
@@ -147,12 +141,12 @@ uint8_t nc1_register_read(
 
 
 /*
- * Запись регистра по ID.
+ * Write a register by register ID.
  *
- * reg_id ограничивается тремя младшими битами.
- * value ограничивается четырьмя младшими битами.
+ * Register ID is limited to 3 bits.
+ * Value is limited to 4 bits.
  *
- * Запись PCL вызывает зарегистрированный callback.
+ * Writing PCL invokes the configured PCL callback.
  */
 void nc1_register_write(
     nc1_register_file_t *rf,
@@ -162,32 +156,32 @@ void nc1_register_write(
 
 
 /* --------------------------------------------------------------------------
- * Individual register properties
+ * Individual registers
  * -------------------------------------------------------------------------- */
 
 uint8_t nc1_get_a(const nc1_register_file_t *rf);
-void    nc1_set_a(nc1_register_file_t *rf, uint8_t value);
+void nc1_set_a(nc1_register_file_t *rf, uint8_t value);
 
 uint8_t nc1_get_b(const nc1_register_file_t *rf);
-void    nc1_set_b(nc1_register_file_t *rf, uint8_t value);
+void nc1_set_b(nc1_register_file_t *rf, uint8_t value);
 
 uint8_t nc1_get_x(const nc1_register_file_t *rf);
-void    nc1_set_x(nc1_register_file_t *rf, uint8_t value);
+void nc1_set_x(nc1_register_file_t *rf, uint8_t value);
 
 uint8_t nc1_get_y(const nc1_register_file_t *rf);
-void    nc1_set_y(nc1_register_file_t *rf, uint8_t value);
+void nc1_set_y(nc1_register_file_t *rf, uint8_t value);
 
 uint8_t nc1_get_sp(const nc1_register_file_t *rf);
-void    nc1_set_sp(nc1_register_file_t *rf, uint8_t value);
+void nc1_set_sp(nc1_register_file_t *rf, uint8_t value);
 
 uint8_t nc1_get_fl(const nc1_register_file_t *rf);
-void    nc1_set_fl(nc1_register_file_t *rf, uint8_t value);
+void nc1_set_fl(nc1_register_file_t *rf, uint8_t value);
 
 uint8_t nc1_get_pch(const nc1_register_file_t *rf);
-void    nc1_set_pch(nc1_register_file_t *rf, uint8_t value);
+void nc1_set_pch(nc1_register_file_t *rf, uint8_t value);
 
 uint8_t nc1_get_pcl(const nc1_register_file_t *rf);
-void    nc1_set_pcl(nc1_register_file_t *rf, uint8_t value);
+void nc1_set_pcl(nc1_register_file_t *rf, uint8_t value);
 
 
 /* --------------------------------------------------------------------------
@@ -198,35 +192,35 @@ void    nc1_set_pcl(nc1_register_file_t *rf, uint8_t value);
  * PC = PCH:PCL
  */
 uint8_t nc1_get_pc(const nc1_register_file_t *rf);
-void    nc1_set_pc(nc1_register_file_t *rf, uint8_t value);
+void nc1_set_pc(nc1_register_file_t *rf, uint8_t value);
 
 
 /*
  * ADDR = X:Y
  */
 uint8_t nc1_get_addr(const nc1_register_file_t *rf);
-void    nc1_set_addr(nc1_register_file_t *rf, uint8_t value);
+void nc1_set_addr(nc1_register_file_t *rf, uint8_t value);
 
 
 /* --------------------------------------------------------------------------
  * Flags
  * -------------------------------------------------------------------------- */
 
-uint8_t nc1_get_flag_z(const nc1_register_file_t *rf);
-void    nc1_set_flag_z(nc1_register_file_t *rf, bool value);
+bool nc1_get_flag_z(const nc1_register_file_t *rf);
+void nc1_set_flag_z(nc1_register_file_t *rf, bool value);
 
-uint8_t nc1_get_flag_c(const nc1_register_file_t *rf);
-void    nc1_set_flag_c(nc1_register_file_t *rf, bool value);
+bool nc1_get_flag_c(const nc1_register_file_t *rf);
+void nc1_set_flag_c(nc1_register_file_t *rf, bool value);
 
-uint8_t nc1_get_flag_m(const nc1_register_file_t *rf);
-void    nc1_set_flag_m(nc1_register_file_t *rf, bool value);
+bool nc1_get_flag_m(const nc1_register_file_t *rf);
+void nc1_set_flag_m(nc1_register_file_t *rf, bool value);
 
-uint8_t nc1_get_flag_r(const nc1_register_file_t *rf);
-void    nc1_set_flag_r(nc1_register_file_t *rf, bool value);
+bool nc1_get_flag_r(const nc1_register_file_t *rf);
+void nc1_set_flag_r(nc1_register_file_t *rf, bool value);
 
 
 /* --------------------------------------------------------------------------
- * Callback configuration
+ * PCL callback configuration
  * -------------------------------------------------------------------------- */
 
 void nc1_registers_set_pcl_callback(
