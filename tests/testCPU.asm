@@ -15,7 +15,7 @@ TEST_1_CARRY:
     JMP ERROR    ; ОШИБКА
 
 TEST_2_ZERO:
-    LDI 0xF      ; A = 0xF (Исправлено с F)
+    LDI 0xF      ; A = 0xF
     INC A        ; A = 0xF + 1. Ожидаем: A=0, C=1, Z=1
     JZR TEST_3_ALU  ; Если Z=1 (Успех), идем к следующему тесту
     JMP ERROR    ; ОШИБКА
@@ -34,7 +34,7 @@ TEST_3_ALU:
 
 TEST_4_MEM:
     LDP 0x50     ; Указатель на RAM 0x50
-    LDI 0xA      ; A = 0xA (Исправлено с A)
+    LDI 0xA      ; A = 0xA
     STR          ; RAM[0x50] = 0xA (Shadow Write в RAM)
     LDI 0        ; Сбрасываем A
     LDRA         ; A = RAM[0x50] (Кросс-чтение из RAM)
