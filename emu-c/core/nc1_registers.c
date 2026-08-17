@@ -1,5 +1,5 @@
 #include "nc1_registers.h"
-
+#include <stddef.h>
 
 /* --------------------------------------------------------------------------
  * Internal helper
@@ -278,9 +278,9 @@ void nc1_set_addr(nc1_register_file_t *rf, uint8_t value)
  * Flags
  * -------------------------------------------------------------------------- */
 
-uint8_t nc1_get_flag_z(const nc1_register_file_t *rf)
+bool nc1_get_flag_z(const nc1_register_file_t *rf)
 {
-    return (nc1_get_fl(rf) & NC1_FLAG_Z) ? 1 : 0;
+    return (nc1_get_fl(rf) & NC1_FLAG_Z) ? true : false;
 }
 
 
@@ -297,9 +297,9 @@ void nc1_set_flag_z(nc1_register_file_t *rf, bool value)
 }
 
 
-uint8_t nc1_get_flag_c(const nc1_register_file_t *rf)
+bool nc1_get_flag_c(const nc1_register_file_t *rf)
 {
-    return (nc1_get_fl(rf) & NC1_FLAG_C) ? 1 : 0;
+    return (nc1_get_fl(rf) & NC1_FLAG_C) ? true : false;
 }
 
 
@@ -316,9 +316,9 @@ void nc1_set_flag_c(nc1_register_file_t *rf, bool value)
 }
 
 
-uint8_t nc1_get_flag_m(const nc1_register_file_t *rf)
+bool nc1_get_flag_m(const nc1_register_file_t *rf)
 {
-    return (nc1_get_fl(rf) & NC1_FLAG_M) ? 1 : 0;
+    return (nc1_get_fl(rf) & NC1_FLAG_M) ? true : false;
 }
 
 
@@ -335,9 +335,9 @@ void nc1_set_flag_m(nc1_register_file_t *rf, bool value)
 }
 
 
-uint8_t nc1_get_flag_r(const nc1_register_file_t *rf)
+bool nc1_get_flag_r(const nc1_register_file_t *rf)
 {
-    return (nc1_get_fl(rf) & NC1_FLAG_R) ? 1 : 0;
+    return (nc1_get_fl(rf) & NC1_FLAG_R) ? true : false;
 }
 
 
